@@ -1,0 +1,21 @@
+[package]
+name = "soundboard"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.17.0"
+rand = "0.9.2"
+rfd = "0.16.0"
+rodio = { version = "0.21.1", features = ["mp3", "wav", "flac", "vorbis"] }
+
+[dependencies.bevy]
+version = "0.17.3"
+features = [
+  "wayland",
+  "x11",
+  "bevy_winit",
+]
+
+[profile.dev.package."*"]
+opt-level = 3
