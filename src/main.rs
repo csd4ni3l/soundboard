@@ -1,26 +1,22 @@
 use bevy::prelude::*;
-
-fn spawn_camera(mut commands: Commands) {
-    commands.spawn(Camera2d::default());
-}
-
-pub fn setup(mut commands: Commands) {
-    spawn_camera(commands);
-}
-
-pub fn update(mut commands: Commands) {
-
-}
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup)
-        .add_systems(Update, update)
+        .add_plugins(EguiPlugin::default())
+        .add_systems(Startup, setup_camera_system)
+        .add_systems(EguiPrimaryContextPass, ui_example_system)
         .run();
 }
 
-#[derive(Component)]
-pub struct Person {
-    pub name: String
+fn setup_camera_system(mut commands: Commands) {
+    commands.spawn(Camera2d);
+}
+
+fn ui_example_system(mut contexts: EguiContexts) -> Result {
+    egui::Window::new("Hello").show(contexts.ctx_mut()?, |ui| {
+        ui.label("world");
+    });
+    Ok(())
 }
