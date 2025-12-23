@@ -9,6 +9,8 @@ cpal = "0.17.0"
 rand = "0.9.2"
 rfd = "0.16.0"
 rodio = { version = "0.21.1", features = ["mp3", "wav", "flac", "vorbis"] }
+serde = "1.0.228"
+serde_json = "1.0.146"
 
 [dependencies.bevy]
 version = "0.17.3"
