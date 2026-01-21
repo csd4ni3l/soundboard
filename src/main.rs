@@ -71,7 +71,7 @@ fn load_data(app_state: &mut AppState) {
         let tabs = app_state.json_data.tabs.clone();
         app_state.loaded_files.clear();
 
-        if tabs.length() > 0 {
+        if tabs.len() > 0 {
             app_state.current_directory = tabs[0].clone();
         }
 
