@@ -16,9 +16,10 @@ struct JSONData {
 }
 
 #[derive(Resource)]
-struct FileData {
+struct AppState {
     loaded_files: HashMap<String, Vec<String>>,
     json_data: JSONData,
+    current_directory: String
 }
 
 fn main() {
@@ -41,15 +42,16 @@ fn main() {
                 }),
         )
         .add_plugins(EguiPlugin::default())
-        .insert_resource(FileData {
+        .insert_resource(AppState {
             loaded_files: HashMap::new(),
             json_data: JSONData { tabs: Vec::new() },
+            current_directory: String::new()
         })
         .add_systems(
             PreStartup,
             setup_camera_system.before(EguiStartupSet::InitContexts),
         )
-        .add_systems(Startup, load_json_system)
+        .add_systems(Startup, load_system)
         .add_systems(
             EguiPrimaryContextPass,
             (ui_system, update_ui_scale_factor_system),
@@ -57,18 +59,26 @@ fn main() {
         .run();
 }
 
-fn load_json_system(mut file_data: ResMut<FileData>) {
+fn load_system(mut app_state: ResMut<AppState>) {
+    load_data(&mut app_state);
+}
+
+fn load_data(app_state: &mut AppState) {
     if std::fs::exists("data.json").expect("Failed to check existence of JSON file") {
         let data = std::fs::read_to_string("data.json").expect("Failed to read JSON");
-        file_data.json_data = serde_json::from_str(&data).expect("Failed to load JSON");
+        app_state.json_data = serde_json::from_str(&data).expect("Failed to load JSON");
 
-        let tabs = file_data.json_data.tabs.clone();
-        file_data.loaded_files.clear();
+        let tabs = app_state.json_data.tabs.clone();
+        app_state.loaded_files.clear();
+
+        if tabs.length() > 0 {
+            app_state.current_directory = tabs[0].clone();
+        }
 
         for tab in tabs {
-            file_data.loaded_files.insert(tab.clone(), Vec::new());
+            app_state.loaded_files.insert(tab.clone(), Vec::new());
             if std::fs::exists(tab.clone()).expect("Failed to check existence of tab directory.") {
-                file_data.loaded_files.insert(
+                app_state.loaded_files.insert(
                     tab.clone(),
                     std::fs::read_dir(tab)
                         .expect("Failed to read directory")
@@ -111,7 +121,7 @@ fn update_ui_scale_factor_system(
     }
 }
 
-fn ui_system(mut contexts: EguiContexts, mut file_data: ResMut<FileData>) -> Result {
+fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
     let ctx = contexts.ctx_mut()?;
 
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -120,6 +130,20 @@ fn ui_system(mut contexts: EguiContexts, mut file_data: ResMut<FileData>) -> Res
 
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.label("The app!");
+        if app_state.current_directory.chars().count() > 0 {
+            if let Some(files) = app_state.loaded_files.get(&app_state.current_directory) {
+                for element in files {
+                    if let Some(filename) = element.split("/").collect::<Vec<_>>().last() {
+                        if ui.add_sized(
+                            [ui.available_width(), 40.0],
+                            egui::Button::new(*filename),
+                        ).clicked() {
+                            println!("{:?}", filename);
+                        }
+                    }
+                }
+            }
+        }
     });
 
     egui::SidePanel::right("tools").show(ctx, |ui| {
@@ -137,14 +161,14 @@ fn ui_system(mut contexts: EguiContexts, mut file_data: ResMut<FileData>) -> Res
             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                 if let Some(path_str) = folder.to_str() {
                     println!("Selected: {}", path_str);
-                    file_data.json_data.tabs.push(path_str.to_string());
+                    app_state.json_data.tabs.push(path_str.to_string());
                     std::fs::write(
                         "data.json",
-                        serde_json::to_string(&file_data.json_data)
+                        serde_json::to_string(&app_state.json_data)
                             .expect("Could not convert JSON to string"),
                     )
                     .expect("Could not write to JSON file");
-                    load_json_system(file_data);
+                    load_data(&mut app_state);
                 } else {
                     println!("Invalid path encoding!");
                 }
@@ -158,7 +182,7 @@ fn ui_system(mut contexts: EguiContexts, mut file_data: ResMut<FileData>) -> Res
             )
             .clicked()
         {
-            load_json_system(file_data);
+            load_data(&mut app_state);
             println!("Reloaded content");
         }
 
