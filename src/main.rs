@@ -11,7 +11,7 @@ use bevy_egui::{
     EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui,
 };
 
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, mixer::Mixer};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, mixer::Mixer, cpal, cpal::traits::{HostTrait, DeviceTrait}};
 
 #[derive(Serialize, Deserialize)]
 struct JSONData {
@@ -39,8 +39,15 @@ struct AppState {
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
+
 fn main() {
-    let stream_handle = OutputStreamBuilder::open_default_stream().expect("Unable to open default audio device");
+    let host = cpal::default_host();
+    let virtual_mic = host.default_output_device().expect("Could not get default output device");
+
+    println!("Using device: {}", virtual_mic.name().unwrap_or_default());
+
+    let stream_handle = OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream");
     let mixer = stream_handle.mixer();
     let sink = Sink::connect_new(&mixer);
 
@@ -111,7 +118,7 @@ fn load_data(app_state: &mut AppState) {
                         .filter_map(|entry| {
                             entry.ok().and_then(|e| {
                                 let path = e.path();
-                                if path.is_file() {
+                                if path.is_file() && ALLOWED_FILE_EXTENSIONS.contains(&path.extension().expect("Could not find extension").to_str().expect("Could not convert extension to string")) {
                                     path.to_str().map(|s| s.to_string())
                                 } else {
                                     None
