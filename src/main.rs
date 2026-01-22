@@ -3,26 +3,47 @@ use bevy::{
     prelude::*,
 };
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::File, io::BufReader, path::Path};
 
 use serde::{Deserialize, Serialize};
 
 use bevy_egui::{
     EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui,
 };
+
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, mixer::Mixer};
+
 #[derive(Serialize, Deserialize)]
 struct JSONData {
     tabs: Vec<String>,
+}
+
+struct PlayingSound {
+    file_path: String,
+    start_time: f32,
+}
+
+struct SoundSystem {
+    sink: Sink,
+    paused: bool
 }
 
 #[derive(Resource)]
 struct AppState {
     loaded_files: HashMap<String, Vec<String>>,
     json_data: JSONData,
-    current_directory: String
+    current_directory: String,
+    currently_playing: Vec<PlayingSound>,
+    sound_system: SoundSystem
 }
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 fn main() {
+    let stream_handle = OutputStreamBuilder::open_default_stream().expect("Unable to open default audio device");
+    let mixer = stream_handle.mixer();
+    let sink = Sink::connect_new(&mixer);
+
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
@@ -45,7 +66,12 @@ fn main() {
         .insert_resource(AppState {
             loaded_files: HashMap::new(),
             json_data: JSONData { tabs: Vec::new() },
-            current_directory: String::new()
+            current_directory: String::new(),
+            currently_playing: Vec::new(),
+            sound_system: SoundSystem {
+                sink,
+                paused: false
+            }
         })
         .add_systems(
             PreStartup,
@@ -104,21 +130,26 @@ fn setup_camera_system(mut commands: Commands) {
 }
 
 fn update_ui_scale_factor_system(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut toggle_scale_factor: Local<Option<bool>>,
     egui_context: Single<(&mut EguiContextSettings, &Camera)>,
 ) {
     let (mut egui_settings, camera) = egui_context.into_inner();
-    if keyboard_input.just_pressed(KeyCode::Slash) || toggle_scale_factor.is_none() {
-        *toggle_scale_factor = Some(!toggle_scale_factor.unwrap_or(true));
+    egui_settings.scale_factor = 1.5 / camera.target_scaling_factor().unwrap_or(1.5);
+}
 
-        let scale_factor = if toggle_scale_factor.unwrap() {
-            1.0
-        } else {
-            1.0 / camera.target_scaling_factor().unwrap_or(1.0)
-        };
-        egui_settings.scale_factor = scale_factor;
-    }
+fn play_sound(file_path: String, app_state: &mut AppState) {
+    let file = BufReader::new(File::open(&file_path).unwrap());
+    let src = Decoder::new(file).unwrap();
+    app_state.sound_system.sink.append(src);
+
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("time should go forward");
+    
+    app_state.currently_playing.push(PlayingSound { 
+        file_path: file_path.clone(), 
+        start_time: since_the_epoch.as_secs_f32(), 
+    })
 }
 
 fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
@@ -128,32 +159,16 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         ui.heading("csd4ni3l Soundboard");
     });
 
-    egui::CentralPanel::default().show(ctx, |ui| {
-        ui.label("The app!");
-        if app_state.current_directory.chars().count() > 0 {
-            if let Some(files) = app_state.loaded_files.get(&app_state.current_directory) {
-                for element in files {
-                    if let Some(filename) = element.split("/").collect::<Vec<_>>().last() {
-                        if ui.add_sized(
-                            [ui.available_width(), 40.0],
-                            egui::Button::new(*filename),
-                        ).clicked() {
-                            println!("{:?}", filename);
-                        }
-                    }
-                }
-            }
-        }
-    });
-
     egui::SidePanel::right("tools").show(ctx, |ui| {
         ui.heading("Tools");
 
         ui.separator();
 
+        let available_height = ui.available_height();
+
         if ui
             .add_sized(
-                [ui.available_width(), 40.0],
+                [ui.available_width(), available_height / 15.0],
                 egui::Button::new("Add folder"),
             )
             .clicked()
@@ -177,7 +192,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
 
         if ui
             .add_sized(
-                [ui.available_width(), 40.0],
+                [ui.available_width(), available_height / 15.0],
                 egui::Button::new("Reload content"),
             )
             .clicked()
@@ -188,12 +203,61 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
 
         if ui
             .add_sized(
-                [ui.available_width(), 40.0],
+                [ui.available_width(), available_height / 15.0],
                 egui::Button::new("Youtube downloader"),
             )
             .clicked()
         {
             println!("Youtube downloader!");
+        }
+    });
+
+    egui::CentralPanel::default().show(ctx, |ui| {
+        let available_height = ui.available_height();
+
+        ui.horizontal(|ui| {
+            let available_width = ui.available_width();
+            let current_directories = app_state.loaded_files.keys().cloned().collect::<Vec<_>>();
+            for directory in current_directories.clone() {
+                if ui
+                    .add_sized(
+                        [available_width / current_directories.len() as f32, available_height / 15.0],
+                        egui::Button::new(&directory),
+                    )
+                    .clicked()
+                {
+                    app_state.current_directory = directory;
+                };
+            }
+        });
+        ui.add_space(available_height / 50.0);
+        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.label(egui::RichText::new(format!("The current directory is {}", app_state.current_directory)).font(egui::FontId::proportional(20.0)));
+        });
+        ui.add_space(available_height / 50.0);
+        if app_state.current_directory.chars().count() > 0 {
+            let files = app_state
+                .loaded_files
+                .get(&app_state.current_directory)
+                .cloned()
+                .unwrap_or_default();
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for element in files {
+                    if let Some(filename) = element.split("/").collect::<Vec<_>>().last() {
+                        if ui.add_sized(
+                            [ui.available_width(), available_height / 15.0],
+                            egui::Button::new(*filename),
+                        ).clicked() {
+                            let path = Path::new(&app_state.current_directory)
+                                .join(filename)
+                                .to_string_lossy()
+                                .to_string();
+                            play_sound(path, &mut app_state);
+                        }
+                    }
+                }
+            });
         }
     });
 
