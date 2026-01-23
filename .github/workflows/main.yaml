@@ -27,7 +27,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install mold & clang (Linux)
+      - name: Install mold, clang, Wayland, ALSA and x11 headers and dependencies (Linux)
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt update
@@ -36,7 +36,7 @@ jobs:
             libwayland-egl-backend-dev \
             libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev \
             libxi-dev libxfixes-dev libxrender-dev \
-            libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev
+            libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev libasound2-dev
 
         shell: bash
 
