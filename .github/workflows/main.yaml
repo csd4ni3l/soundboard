@@ -27,6 +27,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install mold & clang (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt update
+          sudo apt install mold clang build-essential -y
+        shell: bash
+
       - name: Build
         run: cargo build --release --verbose
 
