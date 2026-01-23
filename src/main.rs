@@ -44,10 +44,10 @@ fn create_virtual_mic() -> OutputStream {
     if cfg!(target_os = "windows") {
         panic!("Windows is currently unsupported.");
     }
-    else if cfg!(target_os = "darwin") {
+    else if cfg!(target_os = "macos") {
         panic!("MacOS is and will most likely stay unsupported.");
     }  
-    else {
+    else if cfg!(target_os = "linux") {
         Command::new("pactl")
             .args(&["load-module", "module-null-sink", "sink_name=VirtualMic", "sink_properties=device.description=\"Virtual_Microphone\""])
             .output()
@@ -56,7 +56,11 @@ fn create_virtual_mic() -> OutputStream {
             .args(&["load-module", "module-remap-source", "master=VirtualMic.monitor", "source_name=VirtualMicSource", "source_properties=device.description=\"Virtual_Mic_Source\""])
             .output()
             .expect("Failed to execute process");
-    };
+    }
+    else {
+        panic!("I have no idea what OS you are on but it's not mainstream enough.");
+    }
+    
     unsafe {
         std::env::set_var("PULSE_SINK", "VirtualMic");
     }
@@ -71,10 +75,10 @@ fn recreate_virtual_mic() -> OutputStream {
     if cfg!(target_os = "windows") {
         panic!("Windows is currently unsupported.");
     }
-    else if cfg!(target_os = "darwin") {
+    else if cfg!(target_os = "macos") {
         panic!("MacOS is and will most likely stay unsupported.");
     } 
-    else {
+    else if cfg!(target_os = "linux"){
         let script = r#"
             pactl list modules short | grep "Virtual_Microphone" | cut -f1 | xargs -L1 pactl unload-module
             pactl list modules short | grep "Virtual_Mic_Source" | cut -f1 | xargs -L1 pactl unload-module
@@ -91,6 +95,9 @@ fn recreate_virtual_mic() -> OutputStream {
         } else {
             println!("Error: {}", String::from_utf8_lossy(&output.stderr));
         }
+    }
+    else {
+        panic!("I have no idea what OS you are on but it's not mainstream enough.");
     }
     
     return create_virtual_mic();
