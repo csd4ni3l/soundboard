@@ -36,7 +36,8 @@ jobs:
             libwayland-egl-backend-dev \
             libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev \
             libxi-dev libxfixes-dev libxrender-dev \
-            libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev libasound2-dev
+            libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev \
+            libasound2-dev libudev-dev
 
         shell: bash
 
