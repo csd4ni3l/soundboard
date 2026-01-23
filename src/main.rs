@@ -12,7 +12,7 @@ use bevy_egui::{
     EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui,
 };
 
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, Device, Host, traits::HostTrait}};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, Device, Host, traits::HostTrait, traits::DeviceTrait}};
 
 #[derive(Serialize, Deserialize)]
 struct JSONData {
