@@ -1,5 +1,5 @@
 use bevy::{
-    log::{Level, LogPlugin},
+    log::Level,
     prelude::*,
 };
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use bevy_egui::{
-    EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui,
+    EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui,
 };
 
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, Device, Host, traits::HostTrait, traits::DeviceTrait}};
@@ -145,7 +145,7 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
             DefaultPlugins
-                .set(LogPlugin {
+                .set(bevy::log::LogPlugin {
                     filter: "warn,ui=info".to_string(),
                     level: Level::INFO,
                     ..Default::default()
@@ -159,7 +159,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(EguiPlugin::default())
+        .add_plugins(bevy_egui::EguiPlugin::default())
         .insert_resource(AppState {
             loaded_files: HashMap::new(),
             json_data: JSONData { tabs: Vec::new() },
@@ -209,7 +209,7 @@ fn load_data(app_state: &mut AppState) {
                         .filter_map(|entry| {
                             entry.ok().and_then(|e| {
                                 let path = e.path();
-                                if path.is_file() && ALLOWED_FILE_EXTENSIONS.contains(&path.extension().expect("Could not find extension").to_str().expect("Could not convert extension to string")) {
+                                if path.is_file() && ALLOWED_FILE_EXTENSIONS.contains(&path.extension().unwrap_or_default().to_str().expect("Could not convert extension to string")) {
                                     path.to_str().map(|s| s.to_string())
                                 } else {
                                     None
