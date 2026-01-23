@@ -3,7 +3,7 @@ use bevy::{
     prelude::*,
 };
 
-use std::{collections::HashMap, fs::File, io::BufReader, path::Path};
+use std::{collections::HashMap, fs::File, io::BufReader, path::Path, process::Command};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use bevy_egui::{
     EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, egui,
 };
 
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, mixer::Mixer, cpal, cpal::traits::{HostTrait, DeviceTrait}};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, traits::HostTrait}};
 
 #[derive(Serialize, Deserialize)]
 struct JSONData {
@@ -20,11 +20,12 @@ struct JSONData {
 
 struct PlayingSound {
     file_path: String,
-    start_time: f32,
+    length: f32,
+    sink: Sink
 }
 
 struct SoundSystem {
-    sink: Sink,
+    stream_handle: OutputStream,
     paused: bool
 }
 
@@ -37,19 +38,66 @@ struct AppState {
     sound_system: SoundSystem
 }
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
 
-fn main() {
+fn create_virtual_mic() -> OutputStream {
+    if cfg!(target_os = "windows") {
+        panic!("Windows is currently unsupported.");
+    }
+    else if cfg!(target_os = "darwin") {
+        panic!("MacOS is and will most likely stay unsupported.");
+    }  
+    else {
+        Command::new("pactl")
+            .args(&["load-module", "module-null-sink", "sink_name=VirtualMic", "sink_properties=device.description=\"Virtual_Microphone\""])
+            .output()
+            .expect("Failed to execute process");
+        Command::new("pactl")
+            .args(&["load-module", "module-remap-source", "master=VirtualMic.monitor", "source_name=VirtualMicSource", "source_properties=device.description=\"Virtual_Mic_Source\""])
+            .output()
+            .expect("Failed to execute process");
+    };
+    unsafe {
+        std::env::set_var("PULSE_SINK", "VirtualMic");
+    }
+
     let host = cpal::default_host();
     let virtual_mic = host.default_output_device().expect("Could not get default output device");
 
-    println!("Using device: {}", virtual_mic.name().unwrap_or_default());
+    return OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream");
+}
 
-    let stream_handle = OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream");
-    let mixer = stream_handle.mixer();
-    let sink = Sink::connect_new(&mixer);
+fn recreate_virtual_mic() -> OutputStream {
+    if cfg!(target_os = "windows") {
+        panic!("Windows is currently unsupported.");
+    }
+    else if cfg!(target_os = "darwin") {
+        panic!("MacOS is and will most likely stay unsupported.");
+    } 
+    else {
+        let script = r#"
+            pactl list modules short | grep "Virtual_Microphone" | cut -f1 | xargs -L1 pactl unload-module
+            pactl list modules short | grep "Virtual_Mic_Source" | cut -f1 | xargs -L1 pactl unload-module
+        "#;
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .output()
+            .expect("Failed to execute process");
+
+        if output.status.success() {
+            println!("Modules unloaded successfully.");
+        } else {
+            println!("Error: {}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
+    
+    return create_virtual_mic();
+}
+
+fn main() {
+    let stream_handle = create_virtual_mic();
 
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
@@ -76,7 +124,7 @@ fn main() {
             current_directory: String::new(),
             currently_playing: Vec::new(),
             sound_system: SoundSystem {
-                sink,
+                stream_handle,
                 paused: false
             }
         })
@@ -146,16 +194,14 @@ fn update_ui_scale_factor_system(
 fn play_sound(file_path: String, app_state: &mut AppState) {
     let file = BufReader::new(File::open(&file_path).unwrap());
     let src = Decoder::new(file).unwrap();
-    app_state.sound_system.sink.append(src);
-
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("time should go forward");
+    let length = src.total_duration().expect("Could not get source duration").as_secs_f32();
+    let sink = Sink::connect_new(&app_state.sound_system.stream_handle.mixer());
+    sink.append(src);
     
     app_state.currently_playing.push(PlayingSound { 
         file_path: file_path.clone(), 
-        start_time: since_the_epoch.as_secs_f32(), 
+        length: length,
+        sink: sink
     })
 }
 
@@ -217,6 +263,35 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         {
             println!("Youtube downloader!");
         }
+
+        if ui
+            .add_sized(
+                [ui.available_width(), available_height / 15.0],
+                egui::Button::new("Recreate Virtual Mic"),
+            )
+            .clicked()
+        {
+            app_state.currently_playing.clear();
+            app_state.sound_system.stream_handle = recreate_virtual_mic();
+            println!("Recreated Virtual microphone!");
+        }
+    });
+
+    egui::TopBottomPanel::bottom("currently_playing").show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if app_state.sound_system.paused {
+                ui.heading("Paused");
+            }
+            else {
+                ui.heading("Playing");
+            }
+
+            ui.vertical(|ui| {
+                for playing_sound in &app_state.currently_playing {
+                    ui.label(format!("{} - {:.2} / {:.2}", playing_sound.file_path, playing_sound.sink.get_pos().as_secs_f32(), playing_sound.length));
+                }
+            })
+        });
     });
 
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -266,6 +341,10 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
                 }
             });
         }
+    });
+    
+    app_state.currently_playing.retain(|playing_sound| {
+        playing_sound.sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) // 0.01 offset needed here because of floating point errors and so its not exact
     });
 
     Ok(())

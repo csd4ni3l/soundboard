@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=csd4ni3l Soundboard
+Comment=A simple soundboard made in Rust
+Exec=/opt/cssoundboard/run_linux.sh
+Terminal=false
+Type=Application
+Categories=Application;
