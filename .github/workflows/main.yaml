@@ -1,0 +1,81 @@
+name: Build and Release
+
+on: push
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: windows-latest
+            platform: windows
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release --verbose
+
+      - name: Verify executable (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: test target/release/soundboard
+        shell: bash
+
+      - name: Locate and rename executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Test-Path target\release\soundboard.exe
+        shell: pwsh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: |
+            target/release/soundboard
+            target/release/soundboard.exe
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download All Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloads
+
+      - name: Create release (if missing) and upload artifacts to tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="latest"
+          echo "Target release tag: $TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; will upload assets with --clobber"
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes "Automated build for $TAG"
+          fi
+          # Upload the executables directly (no zip files)
+          gh release upload "$TAG" downloads/linux/soundboard --clobber
+          gh release upload "$TAG" downloads/windows/soundboard.exe --clobber

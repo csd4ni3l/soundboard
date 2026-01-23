@@ -14,7 +14,9 @@ serde_json = "1.0.146"
 [dependencies.bevy]
 version = "0.17.3"
 features = [
-  "wayland",
-  "x11",
   "bevy_winit",
 ]
+
+[target.'cfg(target_os = "linux")'.dependencies.bevy]
+version = "0.17.3"
+features = ["wayland", "x11", "bevy_winit"]

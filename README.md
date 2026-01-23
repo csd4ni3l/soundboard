@@ -1,4 +1,15 @@
 Soundboard made in Rust & Bevy. My first Rust project.
 
-For compilation on Linux, you will need the mold linker and clang to speed things up.
-On an arch machine for example, do `sudo pacman -S mold`
+# Support & Requirements
+- On all OSes, you need to still select the device inside the app you want to use it in.
+
+## Linux
+- Needs the `mold` linker and `clang` to compile fast
+- ALSA & PulseAudio/Pipewire-pulse is a requirement
+
+## Windows
+- Needs the VB-Cable driver (https://vb-audio.com/Cable/)
+
+## MacOS & Other
+- Might work as a music player with the default output device.
+- Not supported and not planned.
