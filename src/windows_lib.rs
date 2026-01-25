@@ -1,4 +1,4 @@
-use rodio::{OutputStream, OutputStreamBuilder, cpal::{self, traits::HostTrait}};
+use rodio::{OutputStream, OutputStreamBuilder, cpal::{self, traits::HostTrait, traits::DeviceTrait}};
 
 pub fn create_virtual_mic_windows() -> OutputStream {
     let host = cpal::host_from_id(cpal::HostId::Wasapi).expect("Could not initialize audio routing using WasAPI");
