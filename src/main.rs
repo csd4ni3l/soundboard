@@ -3,16 +3,21 @@ use bevy::{
     prelude::*,
 };
 
-use std::{collections::HashMap, fs::File, io::BufReader, path::Path, process::Command};
+use std::{collections::HashMap, fs::File, io::BufReader, path::Path};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use bevy_egui::{
     EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui,
 };
 
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, Device, Host, traits::HostTrait, traits::DeviceTrait}};
+#[cfg(target_os = "linux")]
+mod linux_lib;
+
+#[cfg(target_os = "windows")]
+mod windows_lib;
+
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, traits::HostTrait}};
 
 #[derive(Serialize, Deserialize)]
 struct JSONData {
@@ -39,74 +44,25 @@ struct AppState {
     json_data: JSONData,
     current_directory: String,
     currently_playing: Vec<PlayingSound>,
-    sound_system: SoundSystem
+    sound_system: SoundSystem,
+    virt_outputs: Vec<(String, String)>,
+    virt_output_index_switch: String,
+    virt_output_index: String
 }
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
 
-fn move_playback_to_sink() {
-    let command_output = Command::new("pactl")
-        .args(&["-f", "json", "list", "sink-inputs"])
-        .output()
-        .expect("Failed to execute process");
-    if command_output.status.success() {
-        let sink_json: Value = serde_json::from_str(str::from_utf8(&command_output.stdout).expect("Failed to convert to string")).expect("Failed to parse sink JSON output");
-        for device in sink_json.as_array().unwrap_or(&vec![]) {
-            if device["properties"]["node.name"] == "alsa_playback.soundboard" {
-                let index = device["index"].as_u64().expect("Device index is not a number").to_string();
-                Command::new("pactl")
-                .args(&["move-sink-input", index.as_str(), "VirtualMic"]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
-                .output()
-                .expect("Failed to execute process");
-            }
-        }
-    }
-}
-
 fn create_virtual_mic() -> OutputStream {
-    let host: Host;
-    // let original_host: Host;
-    // let normal_output: Device;
-    let virtual_mic: Device;
-
     #[cfg(target_os = "windows")]
-    {
-        host = cpal::host_from_id(cpal::HostId::Wasapi).expect("Could not initialize audio routing using WasAPI");
-        virtual_mic = host.output_devices().expect("Could not list Output devices").find(|device| {
-            device.name().ok().map(|name|{
-                name.contains("CABLE Input") || name.contains("VB-Audio")
-            }).unwrap_or(false)
-        }).expect("Could not get default output device");
-        // normal_output = host.default_output_device().expect("Could not get default output device");
-        return OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream");
-        // return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
-    }
+    return windows_lib::create_virtual_mic_windows();
     
     #[cfg(target_os = "linux")]
-    {
-        // original_host = cpal::host_from_id(cpal::HostId::Alsa).expect("Could not initialize audio routing using ALSA");
-        // normal_output = original_host.default_output_device().expect("Could not get default output device");
-
-        Command::new("pactl")
-            .args(&["load-module", "module-null-sink", "sink_name=VirtualMic", "sink_properties=device.description=\"Virtual_Microphone\""])
-            .output()
-            .expect("Failed to execute process");
-        Command::new("pactl")
-            .args(&["load-module", "module-remap-source", "master=VirtualMic.monitor", "source_name=VirtualMicSource", "source_properties=device.description=\"Virtual_Mic_Source\""])
-            .output()
-            .expect("Failed to execute process");
-                
-        host = cpal::host_from_id(cpal::HostId::Alsa).expect("Could not initialize audio routing using ALSA"); // Alsa needed so pulse default works
-        virtual_mic = host.default_output_device().expect("Could not get default output device");
-        let virtual_mic_stream = OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream");
-        move_playback_to_sink();
-        return virtual_mic_stream;
-        // return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
-    }
+    return linux_lib::create_virtual_mic_linux();
+    
     #[allow(unreachable_code)] {
         println!("Unknown/unsupported OS. Audio support may not work or may route to default output (headset, headphones, etc).");
-        host = cpal::default_host();
-        virtual_mic = host.default_output_device().expect("Could not get default output device");
+        let host = cpal::default_host();
+        let virtual_mic = host.default_output_device().expect("Could not get default output device");
         return OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream")
         // normal_output = host.default_output_device().expect("Could not get default output device");
         // return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
@@ -115,26 +71,21 @@ fn create_virtual_mic() -> OutputStream {
 }
 
 fn reload_sound() -> OutputStream {
-    if cfg!(target_os = "linux"){
-        let script = r#"
-            pactl list modules short | grep "Virtual_Microphone" | cut -f1 | xargs -L1 pactl unload-module
-            pactl list modules short | grep "Virtual_Mic_Source" | cut -f1 | xargs -L1 pactl unload-module
-        "#;
-
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(script)
-            .output()
-            .expect("Failed to execute process");
-
-        if output.status.success() {
-            println!("Modules unloaded successfully.");
-        } else {
-            println!("Error: {}", String::from_utf8_lossy(&output.stderr));
-        }
-    }
+    #[cfg(target_os = "linux")]
+    linux_lib::reload_sound();
     
     return create_virtual_mic();
+}
+
+fn list_outputs() -> Vec<(String, String)>{
+    #[cfg(target_os = "windows")]
+    return Vec::from([("Select in apps".to_string(), String::from("9999999"))]);
+
+    #[cfg(target_os = "linux")]
+    return linux_lib::list_outputs();
+
+    #[allow(unreachable_code)]
+    return Vec::new();
 }
 
 fn main() {
@@ -169,7 +120,10 @@ fn main() {
                 virtual_mic_stream,
                 // normal_output_stream,
                 paused: false
-            }
+            },
+            virt_outputs: Vec::new(),
+            virt_output_index_switch: String::from("0"),
+            virt_output_index: String::from("999")
         })
         .add_systems(
             PreStartup,
@@ -178,12 +132,27 @@ fn main() {
         .add_systems(Startup, load_system)
         .add_systems(
             EguiPrimaryContextPass,
-            (ui_system, update_ui_scale_factor_system),
+            (ui_system, update_ui_scale_factor_system, update_virtualmic),
         )
         .run();
 }
 
+fn update_virtualmic(mut app_state: ResMut<AppState>) {
+    if app_state.virt_outputs.is_empty() {
+        return;
+    }
+
+    if app_state.virt_output_index != app_state.virt_output_index_switch {
+        app_state.virt_output_index = app_state.virt_output_index_switch.clone();
+        linux_lib::move_index_to_virtualmic(app_state.virt_output_index_switch.clone());
+    }
+}
+
 fn load_system(mut app_state: ResMut<AppState>) {
+    app_state.virt_outputs = list_outputs();
+    if !app_state.virt_outputs.is_empty() {
+        app_state.virt_output_index_switch = app_state.virt_outputs[0].1.clone();
+    }
     load_data(&mut app_state);
 }
 
@@ -247,7 +216,6 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     // let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());    
     // normal_sink.append(normal_src);
     // normal_sink.play();
-
     
     app_state.currently_playing.push(PlayingSound { 
         file_path: file_path.clone(), 
@@ -268,12 +236,36 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         ui.heading("Tools");
 
         ui.separator();
-
+        
+        let available_width = ui.available_width();
         let available_height = ui.available_height();
+        let outputs = app_state.virt_outputs.clone();
+
+        let mut mic_name = "Select inside apps".to_string();
+
+        #[cfg(target_os = "linux")] {
+            let output_index = app_state.virt_output_index.clone();
+            let output_device  = linux_lib::get_device_by_index("source-outputs", output_index);
+            if let Some(app_name) = output_device["properties"]["application.name"].as_str() {
+                mic_name = app_name.to_string();
+            }
+        }
+
+        ui.label("Virtual Mic Output");
+
+        egui::ComboBox::from_id_salt("Virtual Mic Output")
+            .selected_text(mic_name)
+            .width(available_width)
+            .height(available_height / 15.0)
+            .show_ui(ui, |ui| {
+                for output in &outputs {
+                    ui.selectable_value(&mut app_state.virt_output_index_switch, output.1.clone(), output.0.clone());
+                }
+        });
 
         if ui
             .add_sized(
-                [ui.available_width(), available_height / 15.0],
+                [available_width, available_height / 15.0],
                 egui::Button::new("Add folder"),
             )
             .clicked()
@@ -297,7 +289,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
 
         if ui
             .add_sized(
-                [ui.available_width(), available_height / 15.0],
+                [available_width, available_height / 15.0],
                 egui::Button::new("Reload content"),
             )
             .clicked()
@@ -308,7 +300,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
 
         if ui
             .add_sized(
-                [ui.available_width(), available_height / 15.0],
+                [available_width, available_height / 15.0],
                 egui::Button::new("Youtube downloader"),
             )
             .clicked()
@@ -318,7 +310,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
 
         if ui
             .add_sized(
-                [ui.available_width(), available_height / 15.0],
+                [available_width, available_height / 15.0],
                 egui::Button::new("Reload sound system"),
             )
             .clicked()
