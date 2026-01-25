@@ -1,8 +1,8 @@
 use rodio::{OutputStream, OutputStreamBuilder, cpal::{self, traits::HostTrait}};
 
 pub fn create_virtual_mic_windows() -> OutputStream {
-    host = cpal::host_from_id(cpal::HostId::Wasapi).expect("Could not initialize audio routing using WasAPI");
-    virtual_mic = host.output_devices().expect("Could not list Output devices").find(|device| {
+    let host = cpal::host_from_id(cpal::HostId::Wasapi).expect("Could not initialize audio routing using WasAPI");
+    let virtual_mic = host.output_devices().expect("Could not list Output devices").find(|device| {
         device.name().ok().map(|name|{
             name.contains("CABLE Input") || name.contains("VB-Audio")
         }).unwrap_or(false)
