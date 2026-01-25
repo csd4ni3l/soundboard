@@ -247,7 +247,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         #[cfg(target_os = "linux")] {
             let output_index = app_state.virt_output_index.clone();
             let output_device  = linux_lib::get_device_by_index("source-outputs", output_index);
-            if let Some(app_name) = output_fdevice["properties"]["application.name"].as_str() {
+            if let Some(app_name) = output_device["properties"]["application.name"].as_str() {
                 mic_name = app_name.to_string();
             }
         }
