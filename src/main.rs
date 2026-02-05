@@ -1,15 +1,12 @@
-use bevy::{
-    log::Level,
-    prelude::*,
-};
+use bevy::{log::Level, prelude::*};
 
 use std::{collections::HashMap, fs::File, io::BufReader, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use bevy_egui::{
-    EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui,
-};
+use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui};
+
+use egui::ecolor::Color32;
 
 #[cfg(target_os = "linux")]
 mod linux_lib;
@@ -17,7 +14,10 @@ mod linux_lib;
 #[cfg(target_os = "windows")]
 mod windows_lib;
 
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, cpal::{self, traits::HostTrait}};
+use rodio::{
+    Decoder, OutputStream, OutputStreamBuilder, Sink, Source,
+    cpal::{self, traits::HostTrait},
+};
 
 #[derive(Serialize, Deserialize)]
 struct JSONData {
@@ -29,13 +29,13 @@ struct PlayingSound {
     file_path: String,
     length: f32,
     virtual_sink: Sink,
-    // normal_sink: Sink 
+    // normal_sink: Sink
 }
 
 struct SoundSystem {
     virtual_mic_stream: OutputStream,
     // normal_output_stream: OutputStream,
-    paused: bool
+    paused: bool,
 }
 
 #[derive(Resource)]
@@ -47,7 +47,7 @@ struct AppState {
     sound_system: SoundSystem,
     virt_outputs: Vec<(String, String)>,
     virt_output_index_switch: String,
-    virt_output_index: String
+    virt_output_index: String,
 }
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
@@ -55,29 +55,36 @@ const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
 fn create_virtual_mic() -> OutputStream {
     #[cfg(target_os = "windows")]
     return windows_lib::create_virtual_mic_windows();
-    
+
     #[cfg(target_os = "linux")]
     return linux_lib::create_virtual_mic_linux();
-    
-    #[allow(unreachable_code)] {
-        println!("Unknown/unsupported OS. Audio support may not work or may route to default output (headset, headphones, etc).");
+
+    #[allow(unreachable_code)]
+    {
+        println!(
+            "Unknown/unsupported OS. Audio support may not work or may route to default output (headset, headphones, etc)."
+        );
         let host = cpal::default_host();
-        let virtual_mic = host.default_output_device().expect("Could not get default output device");
-        return OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream")
+        let virtual_mic = host
+            .default_output_device()
+            .expect("Could not get default output device");
+        return OutputStreamBuilder::from_device(virtual_mic)
+            .expect("Unable to open default audio device")
+            .open_stream()
+            .expect("Failed to open stream");
         // normal_output = host.default_output_device().expect("Could not get default output device");
         // return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
     }
-
 }
 
 fn reload_sound() -> OutputStream {
     #[cfg(target_os = "linux")]
     linux_lib::reload_sound();
-    
+
     return create_virtual_mic();
 }
 
-fn list_outputs() -> Vec<(String, String)>{
+fn list_outputs() -> Vec<(String, String)> {
     #[cfg(target_os = "windows")]
     return Vec::from([("Select in apps".to_string(), String::from("9999999"))]);
 
@@ -119,11 +126,11 @@ fn main() {
             sound_system: SoundSystem {
                 virtual_mic_stream,
                 // normal_output_stream,
-                paused: false
+                paused: false,
             },
             virt_outputs: Vec::new(),
             virt_output_index_switch: String::from("0"),
-            virt_output_index: String::from("999")
+            virt_output_index: String::from("999"),
         })
         .add_systems(
             PreStartup,
@@ -179,7 +186,15 @@ fn load_data(app_state: &mut AppState) {
                         .filter_map(|entry| {
                             entry.ok().and_then(|e| {
                                 let path = e.path();
-                                if path.is_file() && ALLOWED_FILE_EXTENSIONS.contains(&path.extension().unwrap_or_default().to_str().expect("Could not convert extension to string")) {
+                                if path.is_file()
+                                    && ALLOWED_FILE_EXTENSIONS.contains(
+                                        &path
+                                            .extension()
+                                            .unwrap_or_default()
+                                            .to_str()
+                                            .expect("Could not convert extension to string"),
+                                    )
+                                {
                                     path.to_str().map(|s| s.to_string())
                                 } else {
                                     None
@@ -197,9 +212,7 @@ fn setup_camera_system(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
-fn update_ui_scale_factor_system(
-    egui_context: Single<(&mut EguiContextSettings, &Camera)>,
-) {
+fn update_ui_scale_factor_system(egui_context: Single<(&mut EguiContextSettings, &Camera)>) {
     let (mut egui_settings, camera) = egui_context.into_inner();
     egui_settings.scale_factor = 1.5 / camera.target_scaling_factor().unwrap_or(1.5);
 }
@@ -208,18 +221,21 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     let virtual_file = File::open(&file_path).unwrap();
     let virtual_src = Decoder::new(BufReader::new(virtual_file)).unwrap();
     let virtual_sink = Sink::connect_new(&app_state.sound_system.virtual_mic_stream.mixer());
-    let length = virtual_src.total_duration().expect("Could not get source duration").as_secs_f32();
+    let length = virtual_src
+        .total_duration()
+        .expect("Could not get source duration")
+        .as_secs_f32();
     virtual_sink.append(virtual_src);
     virtual_sink.play();
-    
+
     // let normal_file = File::open(&file_path).unwrap();
     // let normal_src = Decoder::new(BufReader::new(normal_file)).unwrap();
-    // let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());    
+    // let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
     // normal_sink.append(normal_src);
     // normal_sink.play();
-    
-    app_state.currently_playing.push(PlayingSound { 
-        file_path: file_path.clone(), 
+
+    app_state.currently_playing.push(PlayingSound {
+        file_path: file_path.clone(),
         length,
         virtual_sink,
         // normal_sink
@@ -237,16 +253,17 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         ui.heading("Tools");
 
         ui.separator();
-        
+
         let available_width = ui.available_width();
         let available_height = ui.available_height();
         let outputs = app_state.virt_outputs.clone();
 
         let mut mic_name = "Select inside apps".to_string();
 
-        #[cfg(target_os = "linux")] {
+        #[cfg(target_os = "linux")]
+        {
             let output_index = app_state.virt_output_index.clone();
-            let output_device  = linux_lib::get_device_by_index("source-outputs", output_index);
+            let output_device = linux_lib::get_device_by_index("source-outputs", output_index);
             if let Some(app_name) = output_device["properties"]["application.name"].as_str() {
                 mic_name = app_name.to_string();
             }
@@ -260,9 +277,13 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
             .height(available_height / 15.0)
             .show_ui(ui, |ui| {
                 for output in &outputs {
-                    ui.selectable_value(&mut app_state.virt_output_index_switch, output.1.clone(), output.0.clone());
+                    ui.selectable_value(
+                        &mut app_state.virt_output_index_switch,
+                        output.1.clone(),
+                        output.0.clone(),
+                    );
                 }
-        });
+            });
 
         if ui
             .add_sized(
@@ -327,14 +348,18 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         ui.horizontal(|ui| {
             if app_state.sound_system.paused {
                 ui.heading("Paused");
-            }
-            else {
+            } else {
                 ui.heading("Playing");
             }
 
             ui.vertical(|ui| {
                 for playing_sound in &app_state.currently_playing {
-                    ui.label(format!("{} - {:.2} / {:.2}", playing_sound.file_path, playing_sound.virtual_sink.get_pos().as_secs_f32(), playing_sound.length));
+                    ui.label(format!(
+                        "{} - {:.2} / {:.2}",
+                        playing_sound.file_path,
+                        playing_sound.virtual_sink.get_pos().as_secs_f32(),
+                        playing_sound.length
+                    ));
                 }
             })
         });
@@ -342,25 +367,28 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
 
     egui::CentralPanel::default().show(ctx, |ui| {
         let available_height = ui.available_height();
-
         ui.horizontal(|ui| {
             let available_width = ui.available_width();
             let current_directories = app_state.loaded_files.keys().cloned().collect::<Vec<_>>();
             for directory in current_directories.clone() {
+                let mut button = egui::Button::new(&directory);
+                if directory == app_state.current_directory {
+                    button = button.fill(Color32::BLACK);
+                }
+
                 if ui
                     .add_sized(
-                        [available_width / current_directories.len() as f32, available_height / 15.0],
-                        egui::Button::new(&directory),
+                        [
+                            available_width / current_directories.len() as f32,
+                            available_height / 15.0,
+                        ],
+                        button,
                     )
                     .clicked()
                 {
                     app_state.current_directory = directory;
                 };
             }
-        });
-        ui.add_space(available_height / 50.0);
-        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            ui.label(egui::RichText::new(format!("The current directory is {}", app_state.current_directory)).font(egui::FontId::proportional(20.0)));
         });
         ui.add_space(available_height / 50.0);
         if app_state.current_directory.chars().count() > 0 {
@@ -373,10 +401,13 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for element in files {
                     if let Some(filename) = element.split("/").collect::<Vec<_>>().last() {
-                        if ui.add_sized(
-                            [ui.available_width(), available_height / 15.0],
-                            egui::Button::new(*filename),
-                        ).clicked() {
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), available_height / 15.0],
+                                egui::Button::new(*filename),
+                            )
+                            .clicked()
+                        {
                             let path = Path::new(&app_state.current_directory)
                                 .join(filename)
                                 .to_string_lossy()
@@ -388,7 +419,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
             });
         }
     });
-    
+
     app_state.currently_playing.retain(|playing_sound| {
         playing_sound.virtual_sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) // 0.01 offset needed here because of floating point errors and so its not exact
     });
