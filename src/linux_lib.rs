@@ -44,7 +44,7 @@ pub fn move_playback_to_sink() {
     for sink in soundboard_sinks {
         let index = sink["index"].as_u64().expect("sink index is not a number").to_string();
         Command::new("pactl")
-                    .args(&["move-sink-input", index.as_str(), "VirtualMic"]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
+                    .args(&["move-sink-input", index.as_str(), "SoundboardSink"]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
                     .output()
                     .expect("Failed to execute process");
     }
@@ -69,6 +69,11 @@ pub fn move_index_to_virtualmic(index: String) {
 
 pub fn create_virtual_mic_linux() -> OutputStream {
     Command::new("pactl")
+        .args(&["load-module", "module-null-sink", "sink_name=SoundboardSink", "sink_properties=device.description=\"Soundboard_Audio\""])
+        .output()
+        .expect("Failed to create SoundboardSink");
+    
+    Command::new("pactl")
         .args(&["load-module", "module-null-sink", "sink_name=VirtualMic", "sink_properties=device.description=\"Virtual_Microphone\""])
         .output()
         .expect("Failed to create VirtualMic");
@@ -78,15 +83,33 @@ pub fn create_virtual_mic_linux() -> OutputStream {
         .output()
         .expect("Failed to create VirtualMicSource");
 
+    // Soundboard audio -> speakers
     Command::new("pactl")
-        .args(&["load-module", "module-loopback", "source=VirtualMic.monitor", "sink=@DEFAULT_SINK@", "latency_msec=1"])
+        .args(&["load-module", "module-loopback", "source=SoundboardSink.monitor", "sink=@DEFAULT_SINK@", "latency_msec=1"])
         .output()
-        .expect("Failed to create loopback");
+        .expect("Failed to create soundboard to speakers loopback");
     
+    // Soundboard audio -> VirtualMic
+    Command::new("pactl")
+        .args(&["load-module", "module-loopback", "source=SoundboardSink.monitor", "sink=VirtualMic", "latency_msec=1"])
+        .output()
+        .expect("Failed to create soundboard to VirtualMic loopback");
+    
+    // Microphone -> VirtualMic ONLY
+    Command::new("pactl")
+        .args(&["load-module", "module-loopback", "source=@DEFAULT_SOURCE@", "sink=VirtualMic", "latency_msec=1"])
+        .output()
+        .expect("Failed to create microphone loopback");
+
     Command::new("pactl")
         .args(&["set-sink-volume", "VirtualMic", "100%"])
         .output()
         .expect("Failed to set volume");
+    
+    Command::new("pactl")
+        .args(&["set-sink-volume", "SoundboardSink", "100%"])
+        .output()
+        .expect("Failed to set soundboard volume");
     
     let host = cpal::host_from_id(cpal::HostId::Alsa).expect("Could not initialize ALSA");
     let device = host.default_output_device().expect("Could not get default output device");
@@ -106,6 +129,7 @@ pub fn reload_sound() {
         pactl list modules short | grep "module-loopback" | cut -f1 | xargs -L1 pactl unload-module
         pactl list modules short | grep "Virtual_Microphone" | cut -f1 | xargs -L1 pactl unload-module
         pactl list modules short | grep "Virtual_Mic_Source" | cut -f1 | xargs -L1 pactl unload-module
+        pactl list modules short | grep "Soundboard_Audio" | cut -f1 | xargs -L1 pactl unload-module
     "#;
 
     let output = Command::new("sh")
