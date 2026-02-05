@@ -344,7 +344,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
             .clicked()
         {
             app_state.currently_playing.clear();
-            app_state.sound_system.output_stream = reload_sound();
+            app_state.sound_system = reload_sound();
             println!("Sucessfully reloaded sound system!");
         }
     });
