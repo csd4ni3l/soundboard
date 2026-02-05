@@ -81,6 +81,12 @@ fn create_virtual_mic() -> SoundSystem {
                 .expect("Unable to open device")
                 .open_stream()
                 .expect("Failed to open stream"),
+            // this is actually not needed here, since windows would exit by far. But, cargo doesnt like SoundSystem not getting the normal_output stream so...
+            #[cfg(target_os = "windows")]
+            normal_output_stream: OutputStreamBuilder::from_device(device)
+                .expect("Unable to open device")
+                .open_stream()
+                .expect("Failed to open stream"),
             paused: false,
         }
     }
@@ -234,7 +240,7 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
         let file2 = File::open(&file_path).unwrap();
         let src2 = Decoder::new(BufReader::new(file2)).unwrap();
         let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
-        sink2.append(src2);
+        normal_sink.append(src2);
     }
 
     sink.play();
@@ -264,6 +270,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         let available_height = ui.available_height();
         let outputs = app_state.virt_outputs.clone();
 
+        #[allow(unused_mut)]
         let mut mic_name = "Select inside apps".to_string();
 
         #[cfg(target_os = "linux")]

@@ -8,7 +8,7 @@ pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream)  {
         }).unwrap_or(false)
     }).expect("Could not get default output device");
     
-    normal_output = host.default_output_device().expect("Could not get default output device");
+    let normal_output = host.default_output_device().expect("Could not get default output device");
 
     return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
 }
