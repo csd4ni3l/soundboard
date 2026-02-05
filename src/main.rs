@@ -15,8 +15,7 @@ mod linux_lib;
 mod windows_lib;
 
 use rodio::{
-    Decoder, OutputStream, OutputStreamBuilder, Sink, Source,
-    cpal::{self, traits::HostTrait},
+    Decoder, OutputStream, Sink, Source, cpal::{self, traits::HostTrait}, OutputStreamBuilder
 };
 
 #[derive(Serialize, Deserialize)]
@@ -28,13 +27,15 @@ struct JSONData {
 struct PlayingSound {
     file_path: String,
     length: f32,
-    virtual_sink: Sink,
-    // normal_sink: Sink
+    sink: Sink,
+    #[cfg(target_os = "windows")]
+    normal_sink: Sink
 }
 
 struct SoundSystem {
-    virtual_mic_stream: OutputStream,
-    // normal_output_stream: OutputStream,
+    #[cfg(target_os = "windows")]
+    normal_output_stream: OutputStream,
+    output_stream: OutputStream,
     paused: bool,
 }
 
@@ -52,32 +53,40 @@ struct AppState {
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
 
-fn create_virtual_mic() -> OutputStream {
+fn create_virtual_mic() -> SoundSystem {
     #[cfg(target_os = "windows")]
-    return windows_lib::create_virtual_mic_windows();
+    {
+        let (normal, virtual_mic) = windows_lib::create_virtual_mic_windows();
+        return SoundSystem {
+            output_stream: virtual_mic,
+            normal_output_stream: normal,
+            paused: false,
+        };
+    }
 
     #[cfg(target_os = "linux")]
-    return linux_lib::create_virtual_mic_linux();
+    {
+        return SoundSystem {
+            output_stream: linux_lib::create_virtual_mic_linux(),
+            paused: false,
+        };
+    }
 
     #[allow(unreachable_code)]
     {
-        println!(
-            "Unknown/unsupported OS. Audio support may not work or may route to default output (headset, headphones, etc)."
-        );
         let host = cpal::default_host();
-        let virtual_mic = host
-            .default_output_device()
-            .expect("Could not get default output device");
-        return OutputStreamBuilder::from_device(virtual_mic)
-            .expect("Unable to open default audio device")
-            .open_stream()
-            .expect("Failed to open stream");
-        // normal_output = host.default_output_device().expect("Could not get default output device");
-        // return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
+        let device = host.default_output_device().expect("Could not get default output device");
+        SoundSystem {
+            output_stream: OutputStreamBuilder::from_device(device)
+                .expect("Unable to open device")
+                .open_stream()
+                .expect("Failed to open stream"),
+            paused: false,
+        }
     }
 }
 
-fn reload_sound() -> OutputStream {
+fn reload_sound() -> SoundSystem {
     #[cfg(target_os = "linux")]
     linux_lib::reload_sound();
 
@@ -96,9 +105,6 @@ fn list_outputs() -> Vec<(String, String)> {
 }
 
 fn main() {
-    let virtual_mic_stream = create_virtual_mic();
-    // let (normal_output_stream, virtual_mic_stream) = create_virtual_mic();
-
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
@@ -123,11 +129,7 @@ fn main() {
             json_data: JSONData { tabs: Vec::new() },
             current_directory: String::new(),
             currently_playing: Vec::new(),
-            sound_system: SoundSystem {
-                virtual_mic_stream,
-                // normal_output_stream,
-                paused: false,
-            },
+            sound_system: create_virtual_mic(),
             virt_outputs: Vec::new(),
             virt_output_index_switch: String::from("0"),
             virt_output_index: String::from("999"),
@@ -218,27 +220,31 @@ fn update_ui_scale_factor_system(egui_context: Single<(&mut EguiContextSettings,
 }
 
 fn play_sound(file_path: String, app_state: &mut AppState) {
-    let virtual_file = File::open(&file_path).unwrap();
-    let virtual_src = Decoder::new(BufReader::new(virtual_file)).unwrap();
-    let virtual_sink = Sink::connect_new(&app_state.sound_system.virtual_mic_stream.mixer());
-    let length = virtual_src
+    let file = File::open(&file_path).unwrap();
+    let src = Decoder::new(BufReader::new(file)).unwrap();
+    let sink = Sink::connect_new(&app_state.sound_system.output_stream.mixer());
+    let length = src
         .total_duration()
         .expect("Could not get source duration")
         .as_secs_f32();
-    virtual_sink.append(virtual_src);
-    virtual_sink.play();
+    sink.append(src);
 
-    // let normal_file = File::open(&file_path).unwrap();
-    // let normal_src = Decoder::new(BufReader::new(normal_file)).unwrap();
-    // let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
-    // normal_sink.append(normal_src);
-    // normal_sink.play();
+    #[cfg(target_os = "windows")]
+    {
+        let file2 = File::open(&file_path).unwrap();
+        let src2 = Decoder::new(BufReader::new(file2)).unwrap();
+        let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
+        sink2.append(src2);
+    }
+
+    sink.play();
 
     app_state.currently_playing.push(PlayingSound {
         file_path: file_path.clone(),
         length,
-        virtual_sink,
-        // normal_sink
+        sink,
+        #[cfg(target_os = "windows")]
+        normal_sink
     })
 }
 
@@ -263,8 +269,8 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         #[cfg(target_os = "linux")]
         {
             let output_index = app_state.virt_output_index.clone();
-            let output_device = linux_lib::get_device_by_index("source-outputs", output_index);
-            if let Some(app_name) = output_device["properties"]["application.name"].as_str() {
+            let output_sink = linux_lib::get_sink_by_index("source-outputs", output_index);
+            if let Some(app_name) = output_sink["properties"]["application.name"].as_str() {
                 mic_name = app_name.to_string();
             }
         }
@@ -338,8 +344,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
             .clicked()
         {
             app_state.currently_playing.clear();
-            app_state.sound_system.virtual_mic_stream = reload_sound();
-            // (app_state.sound_system.normal_output_stream, app_state.sound_system.virtual_mic_stream) = reload_sound();
+            app_state.sound_system.output_stream = reload_sound();
             println!("Sucessfully reloaded sound system!");
         }
     });
@@ -357,7 +362,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
                     ui.label(format!(
                         "{} - {:.2} / {:.2}",
                         playing_sound.file_path,
-                        playing_sound.virtual_sink.get_pos().as_secs_f32(),
+                        playing_sound.sink.get_pos().as_secs_f32(),
                         playing_sound.length
                     ));
                 }
@@ -421,7 +426,7 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
     });
 
     app_state.currently_playing.retain(|playing_sound| {
-        playing_sound.virtual_sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) // 0.01 offset needed here because of floating point errors and so its not exact
+        playing_sound.sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) // 0.01 offset needed here because of floating point errors and so its not exact
     });
 
     Ok(())

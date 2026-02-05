@@ -17,37 +17,45 @@ fn pactl_list(sink_type: &str) -> Value {
     }
 }
 
-pub fn get_device_by_index(sink_type: &str, index: String) -> Value {
-    let devices = pactl_list(sink_type);
+pub fn get_sink_by_index(sink_type: &str, index: String) -> Value {
+    let sinks = pactl_list(sink_type);
 
-    for device in devices.as_array().unwrap_or(&vec![]) {
-        if device["index"].as_u64().expect("Device index is not a number").to_string() == index {
-            return device.clone();
+    for sink in sinks.as_array().unwrap_or(&vec![]) {
+        if sink["index"].as_u64().expect("sink index is not a number").to_string() == index {
+            return sink.clone();
         }
     }
 
     return Value::Null{};
 }
 
-pub fn move_playback_to_sink() {
+fn find_soundboard_sinks() -> Vec<Value> {
     let sink_inputs = pactl_list("sink-inputs");
-    for device in sink_inputs.as_array().unwrap_or(&vec![]) {
-        if device["properties"]["node.name"] == "alsa_playback.soundboard" {
-            let index = device["index"].as_u64().expect("Device index is not a number").to_string();
-            Command::new("pactl")
-            .args(&["move-sink-input", index.as_str(), "VirtualMic"]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
-            .output()
-            .expect("Failed to execute process");
-        }
+    sink_inputs.as_array()
+               .unwrap_or(&vec![])
+               .iter()
+               .filter(|sink| {sink["properties"]["node.name"] == "alsa_playback.soundboard"})
+               .cloned()
+               .collect()
+}  
+
+pub fn move_playback_to_sink() {
+    let soundboard_sinks = find_soundboard_sinks();
+    for sink in soundboard_sinks {
+        let index = sink["index"].as_u64().expect("sink index is not a number").to_string();
+        Command::new("pactl")
+                    .args(&["move-sink-input", index.as_str(), "VirtualMic"]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
+                    .output()
+                    .expect("Failed to execute process");
     }
 }
 
 pub fn list_outputs() -> Vec<(String, String)> {
     let source_outputs = pactl_list("source-outputs");
-    return source_outputs.as_array().unwrap_or(&vec![]).iter().filter_map(|device| {
-        let app_name = device["properties"]["application.name"].as_str()?;
-        let binary = device["properties"]["application.process.binary"].as_str().unwrap_or("Unknown");
-        let index = device["index"].as_u64().expect("Device index is not a number").to_string();
+    return source_outputs.as_array().unwrap_or(&vec![]).iter().filter_map(|sink| {
+        let app_name = sink["properties"]["application.name"].as_str()?;
+        let binary = sink["properties"]["application.process.binary"].as_str().unwrap_or("Unknown");
+        let index = sink["index"].as_u64().expect("sink index is not a number").to_string();
         Some((format!("{} ({})", app_name, binary), index))
     }).collect();
 }
@@ -60,36 +68,42 @@ pub fn move_index_to_virtualmic(index: String) {
 }
 
 pub fn create_virtual_mic_linux() -> OutputStream {
-    // original_host = cpal::host_from_id(cpal::HostId::Alsa).expect("Could not initialize audio routing using ALSA");
-    // normal_output = original_host.default_output_device().expect("Could not get default output device");
-
     Command::new("pactl")
         .args(&["load-module", "module-null-sink", "sink_name=VirtualMic", "sink_properties=device.description=\"Virtual_Microphone\""])
         .output()
-        .expect("Failed to execute process");
+        .expect("Failed to create VirtualMic");
+    
     Command::new("pactl")
         .args(&["load-module", "module-remap-source", "master=VirtualMic.monitor", "source_name=VirtualMicSource", "source_properties=device.description=\"Virtual_Mic_Source\""])
         .output()
-        .expect("Failed to execute process");
+        .expect("Failed to create VirtualMicSource");
+
+    Command::new("pactl")
+        .args(&["load-module", "module-loopback", "source=VirtualMic.monitor", "sink=@DEFAULT_SINK@", "latency_msec=1"])
+        .output()
+        .expect("Failed to create loopback");
+    
     Command::new("pactl")
         .args(&["set-sink-volume", "VirtualMic", "100%"])
         .output()
-        .expect("Failed to set sink volume");
-    Command::new("pactl")
-        .args(&["set-sink-volume", "VirtualMicSource", "100%"])
-        .output()
-        .expect("Failed to set sink volume");
+        .expect("Failed to set volume");
     
-    let host = cpal::host_from_id(cpal::HostId::Alsa).expect("Could not initialize audio routing using ALSA"); // Alsa needed so pulse default works
-    let virtual_mic = host.default_output_device().expect("Could not get default output device");
-    let virtual_mic_stream = OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream");
+    let host = cpal::host_from_id(cpal::HostId::Alsa).expect("Could not initialize ALSA");
+    let device = host.default_output_device().expect("Could not get default output device");
+
+    let stream = OutputStreamBuilder::from_device(device)
+        .expect("Unable to open VirtualMic")
+        .open_stream()
+        .expect("Failed to open stream");
+
     move_playback_to_sink();
-    return virtual_mic_stream;
-    // return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
+
+    return stream;
 }
 
 pub fn reload_sound() {
     let script = r#"
+        pactl list modules short | grep "module-loopback" | cut -f1 | xargs -L1 pactl unload-module
         pactl list modules short | grep "Virtual_Microphone" | cut -f1 | xargs -L1 pactl unload-module
         pactl list modules short | grep "Virtual_Mic_Source" | cut -f1 | xargs -L1 pactl unload-module
     "#;
