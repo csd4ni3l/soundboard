@@ -257,7 +257,8 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     app_state.currently_playing.push(PlayingSound {
         file_path: file_path.clone(),
         length,
-        sink
+        sink,
+        sink // sink twice cuz rust is dumb shit and doesnt understand im already returning
     })
 }
 
