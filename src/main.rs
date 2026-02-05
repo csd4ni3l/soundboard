@@ -228,38 +228,31 @@ fn update_ui_scale_factor_system(egui_context: Single<(&mut EguiContextSettings,
 fn play_sound(file_path: String, app_state: &mut AppState) {
     let file = File::open(&file_path).unwrap();
     let src = Decoder::new(BufReader::new(file)).unwrap();
-    let sink = Sink::connect_new(&app_state.sound_system.output_stream.mixer());
     let length = src
         .total_duration()
         .expect("Could not get source duration")
         .as_secs_f32();
     
+    let sink = Sink::connect_new(&app_state.sound_system.output_stream.mixer());
     sink.append(src);
     sink.play();
 
-    #[cfg(target_os = "windows")]
-    {
-        let file2 = File::open(&file_path).unwrap();
-        let src2 = Decoder::new(BufReader::new(file2)).unwrap();
-        let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
-        normal_sink.append(src2);
-
-        app_state.currently_playing.push(PlayingSound {
-            file_path: file_path.clone(),
-            length,
-            sink,
-            normal_sink
-        });
-        
-        return;
-    }
-
-    app_state.currently_playing.push(PlayingSound {
+    let playing_sound = PlayingSound {
         file_path: file_path.clone(),
         length,
         sink,
-        sink // sink twice cuz rust is dumb shit and doesnt understand im already returning
-    })
+        #[cfg(target_os = "windows")]
+        normal_sink: {
+            let file2 = File::open(&file_path).unwrap();
+            let src2 = Decoder::new(BufReader::new(file2)).unwrap();
+            let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
+            normal_sink.append(src2);
+            normal_sink.play();
+            normal_sink
+        }
+    };
+
+    app_state.currently_playing.push(playing_sound);
 }
 
 fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
