@@ -233,7 +233,9 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
         .total_duration()
         .expect("Could not get source duration")
         .as_secs_f32();
+    
     sink.append(src);
+    sink.play();
 
     #[cfg(target_os = "windows")]
     {
@@ -241,16 +243,21 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
         let src2 = Decoder::new(BufReader::new(file2)).unwrap();
         let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
         normal_sink.append(src2);
-    }
 
-    sink.play();
+        app_state.currently_playing.push(PlayingSound {
+            file_path: file_path.clone(),
+            length,
+            sink,
+            normal_sink
+        });
+        
+        return;
+    }
 
     app_state.currently_playing.push(PlayingSound {
         file_path: file_path.clone(),
         length,
-        sink,
-        #[cfg(target_os = "windows")]
-        normal_sink
+        sink
     })
 }
 
