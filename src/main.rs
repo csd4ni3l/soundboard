@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs::File, io::BufReader, path::Path, time::Insta
 
 use serde::{Deserialize, Serialize};
 
-use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui::{self, Context}};
+use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui::{self, Context, Ui}};
 
 use egui::ecolor::Color32;
 
@@ -269,6 +269,36 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     app_state.currently_playing.push(playing_sound);
 }
 
+fn create_virtual_mic_dropdown(ui: &mut Ui, mut app_state: &mut ResMut<AppState>, available_width: f32, available_height: f32) {
+    #[cfg(target_os = "linux")] {
+        let outputs = app_state.virt_outputs.clone();
+        let output_index = app_state.virt_output_index.clone();
+        let output_sink = linux_lib::get_sink_by_index("source-outputs", output_index);
+        if let Some(app_name) = output_sink["properties"]["application.name"].as_str() {
+            egui::ComboBox::from_id_salt("Virtual Mic Output")
+                .selected_text(app_name.to_string())
+                .width(available_width)
+                .height(available_height / 15.0)
+                .show_ui(ui, |ui| {
+                    for output in &outputs {
+                        ui.selectable_value(
+                            &mut app_state.virt_output_index_switch,
+                            output.1.clone(),
+                            output.0.clone(),
+                        );
+                    }
+                });
+        }
+        else {
+            ui.add(egui::Button::new("No apps found to use.".to_string()));
+        }
+
+        return;
+    }
+
+    ui.add(egui::Button::new("Unsupported. Select inside apps.".to_string()));
+}
+
 fn main_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
     egui::SidePanel::right("tools").show(ctx, |ui| {
         ui.heading("Tools");
@@ -277,33 +307,8 @@ fn main_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
 
         let available_width = ui.available_width();
         let available_height = ui.available_height();
-        let outputs = app_state.virt_outputs.clone();
         ui.label("Virtual Mic Output");
-        if cfg!(target_os = "linux") {
-            let output_index = app_state.virt_output_index.clone();
-            let output_sink = linux_lib::get_sink_by_index("source-outputs", output_index);
-            if let Some(app_name) = output_sink["properties"]["application.name"].as_str() {
-                egui::ComboBox::from_id_salt("Virtual Mic Output")
-                    .selected_text(app_name.to_string())
-                    .width(available_width)
-                    .height(available_height / 15.0)
-                    .show_ui(ui, |ui| {
-                        for output in &outputs {
-                            ui.selectable_value(
-                                &mut app_state.virt_output_index_switch,
-                                output.1.clone(),
-                                output.0.clone(),
-                            );
-                        }
-                    });
-            }
-            else {
-                ui.add(egui::Button::new("No apps found to use.".to_string()));
-            }
-        }
-        else {
-            ui.add(egui::Button::new("Unsupported. Select inside apps.".to_string()));
-        }
+        create_virtual_mic_dropdown(ui, &mut app_state, available_width, available_height);
 
         if ui
             .add_sized(
