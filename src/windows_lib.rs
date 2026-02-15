@@ -1,14 +1,35 @@
-use rodio::{OutputStream, OutputStreamBuilder, cpal::{self, traits::HostTrait, traits::DeviceTrait}};
+use rodio::{
+    OutputStream, OutputStreamBuilder,
+    cpal::{self, traits::DeviceTrait, traits::HostTrait},
+};
 
-pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream)  {
-    let host = cpal::host_from_id(cpal::HostId::Wasapi).expect("Could not initialize audio routing using WasAPI");
-    let virtual_mic = host.output_devices().expect("Could not list Output devices").find(|device| {
-        device.name().ok().map(|name|{
-            name.contains("CABLE Input") || name.contains("VB-Audio")
-        }).unwrap_or(false)
-    }).expect("Could not get default output device");
-    
-    let normal_output = host.default_output_device().expect("Could not get default output device");
+pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream) {
+    let host = cpal::host_from_id(cpal::HostId::Wasapi)
+        .expect("Could not initialize audio routing using WasAPI");
+    let virtual_mic = host
+        .output_devices()
+        .expect("Could not list Output devices")
+        .find(|device| {
+            device
+                .name()
+                .ok()
+                .map(|name| name.contains("CABLE Input") || name.contains("VB-Audio"))
+                .unwrap_or(false)
+        })
+        .expect("Could not get VB Cable output device. Is VB Cable Driver installed?");
 
-    return (OutputStreamBuilder::from_device(normal_output).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"), OutputStreamBuilder::from_device(virtual_mic).expect("Unable to open default audio device").open_stream().expect("Failed to open stream"));
+    let normal_output = host
+        .default_output_device()
+        .expect("Could not get default output device");
+
+    return (
+        OutputStreamBuilder::from_device(normal_output)
+            .expect("Unable to open default audio device")
+            .open_stream()
+            .expect("Failed to open stream"),
+        OutputStreamBuilder::from_device(virtual_mic)
+            .expect("Unable to open default audio device")
+            .open_stream()
+            .expect("Failed to open stream"),
+    );
 }

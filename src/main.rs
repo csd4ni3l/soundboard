@@ -1,6 +1,6 @@
 use bevy::{log::Level, prelude::*};
 
-use std::{collections::HashMap, fs::File, io::BufReader, path::Path};
+use std::{collections::HashMap, fs::File, io::BufReader, path::Path, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,8 @@ mod linux_lib;
 mod windows_lib;
 
 use rodio::{
-    Decoder, OutputStream, Sink, Source, cpal::{self, traits::HostTrait}, OutputStreamBuilder
+    Decoder, OutputStream, OutputStreamBuilder, Sink, Source,
+    cpal::{self, traits::HostTrait},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -29,7 +30,7 @@ struct PlayingSound {
     length: f32,
     sink: Sink,
     #[cfg(target_os = "windows")]
-    normal_sink: Sink
+    normal_sink: Sink,
 }
 
 struct SoundSystem {
@@ -49,6 +50,7 @@ struct AppState {
     virt_outputs: Vec<(String, String)>,
     virt_output_index_switch: String,
     virt_output_index: String,
+    last_virt_output_update: Instant
 }
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
@@ -75,7 +77,9 @@ fn create_virtual_mic() -> SoundSystem {
     #[allow(unreachable_code)]
     {
         let host = cpal::default_host();
-        let device = host.default_output_device().expect("Could not get default output device");
+        let device = host
+            .default_output_device()
+            .expect("Could not get default output device");
         SoundSystem {
             output_stream: OutputStreamBuilder::from_device(device)
                 .expect("Unable to open device")
@@ -101,7 +105,7 @@ fn reload_sound() -> SoundSystem {
 
 fn list_outputs() -> Vec<(String, String)> {
     #[cfg(target_os = "windows")]
-    return Vec::from([("Select in apps".to_string(), String::from("9999999"))]);
+    return Vec::from([("Select inside apps".to_string(), String::from("9999999"))]);
 
     #[cfg(target_os = "linux")]
     return linux_lib::list_outputs();
@@ -139,6 +143,7 @@ fn main() {
             virt_outputs: Vec::new(),
             virt_output_index_switch: String::from("0"),
             virt_output_index: String::from("999"),
+            last_virt_output_update: Instant::now()
         })
         .add_systems(
             PreStartup,
@@ -147,14 +152,23 @@ fn main() {
         .add_systems(Startup, load_system)
         .add_systems(
             EguiPrimaryContextPass,
-            (ui_system, update_ui_scale_factor_system, update_virtualmic),
+            (draw, update_ui_scale_factor_system, update),
         )
         .run();
 }
 
-fn update_virtualmic(mut app_state: ResMut<AppState>) {
+fn update(mut app_state: ResMut<AppState>) {
+    if app_state.last_virt_output_update.elapsed().as_secs_f32() >= 3.0 {
+        app_state.last_virt_output_update = Instant::now();
+        app_state.virt_outputs = list_outputs();    
+    }
+
     if app_state.virt_outputs.is_empty() {
         return;
+    }
+
+    if !(app_state.virt_output_index == "999".to_string()) {
+        app_state.virt_output_index_switch = app_state.virt_outputs[0].1.clone();
     }
 
     if app_state.virt_output_index != app_state.virt_output_index_switch {
@@ -164,8 +178,7 @@ fn update_virtualmic(mut app_state: ResMut<AppState>) {
     }
 }
 
-fn load_system(mut app_state: ResMut<AppState>) {
-    app_state.virt_outputs = list_outputs();
+fn load_system(mut app_state: ResMut<AppState>) {   
     if !app_state.virt_outputs.is_empty() {
         app_state.virt_output_index_switch = app_state.virt_outputs[0].1.clone();
     }
@@ -232,7 +245,7 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
         .total_duration()
         .expect("Could not get source duration")
         .as_secs_f32();
-    
+
     let sink = Sink::connect_new(&app_state.sound_system.output_stream.mixer());
     sink.append(src);
     sink.play();
@@ -245,17 +258,18 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
         normal_sink: {
             let file2 = File::open(&file_path).unwrap();
             let src2 = Decoder::new(BufReader::new(file2)).unwrap();
-            let normal_sink = Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
+            let normal_sink =
+                Sink::connect_new(&app_state.sound_system.normal_output_stream.mixer());
             normal_sink.append(src2);
             normal_sink.play();
             normal_sink
-        }
+        },
     };
 
     app_state.currently_playing.push(playing_sound);
 }
 
-fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
+fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
     let ctx = contexts.ctx_mut()?;
 
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -270,34 +284,32 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
         let available_width = ui.available_width();
         let available_height = ui.available_height();
         let outputs = app_state.virt_outputs.clone();
-
-        #[allow(unused_mut)]
-        let mut mic_name = "Select inside apps".to_string();
-
-        #[cfg(target_os = "linux")]
-        {
+        ui.label("Virtual Mic Output");
+        if cfg!(target_os = "linux") {
             let output_index = app_state.virt_output_index.clone();
             let output_sink = linux_lib::get_sink_by_index("source-outputs", output_index);
             if let Some(app_name) = output_sink["properties"]["application.name"].as_str() {
-                mic_name = app_name.to_string();
+                egui::ComboBox::from_id_salt("Virtual Mic Output")
+                    .selected_text(app_name.to_string())
+                    .width(available_width)
+                    .height(available_height / 15.0)
+                    .show_ui(ui, |ui| {
+                        for output in &outputs {
+                            ui.selectable_value(
+                                &mut app_state.virt_output_index_switch,
+                                output.1.clone(),
+                                output.0.clone(),
+                            );
+                        }
+                    });
+            }
+            else {
+                ui.add(egui::Button::new("No apps found to use.".to_string()));
             }
         }
-
-        ui.label("Virtual Mic Output");
-
-        egui::ComboBox::from_id_salt("Virtual Mic Output")
-            .selected_text(mic_name)
-            .width(available_width)
-            .height(available_height / 15.0)
-            .show_ui(ui, |ui| {
-                for output in &outputs {
-                    ui.selectable_value(
-                        &mut app_state.virt_output_index_switch,
-                        output.1.clone(),
-                        output.0.clone(),
-                    );
-                }
-            });
+        else {
+            ui.add(egui::Button::new("Unsupported. Select inside apps.".to_string()));
+        }
 
         if ui
             .add_sized(
@@ -358,24 +370,48 @@ fn ui_system(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Res
     });
 
     egui::TopBottomPanel::bottom("currently_playing").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            if app_state.sound_system.paused {
-                ui.heading("Paused");
-            } else {
-                ui.heading("Playing");
+        ui.vertical(|ui| {
+            for playing_sound in &app_state.currently_playing {
+                ui.label(format!(
+                    "{} - {:.2} / {:.2}",
+                    playing_sound.file_path,
+                    playing_sound.sink.get_pos().as_secs_f32(),
+                    playing_sound.length
+                ));
             }
-
-            ui.vertical(|ui| {
-                for playing_sound in &app_state.currently_playing {
-                    ui.label(format!(
-                        "{} - {:.2} / {:.2}",
-                        playing_sound.file_path,
-                        playing_sound.sink.get_pos().as_secs_f32(),
-                        playing_sound.length
-                    ));
-                }
-            })
         });
+        let available_width = ui.available_width();
+        let available_height = ui.available_height();
+
+        if ui
+            .add_sized(
+                [available_width, available_height / 15.0],
+                egui::Button::new("Stop all"),
+            )
+            .clicked()
+        {
+            app_state.currently_playing.clear();
+        }
+        if ui
+            .add_sized(
+                [available_width, available_height / 15.0],
+                egui::Button::new(if app_state.sound_system.paused {"Resume"} else {"Pause"}),
+            )
+            .clicked()
+        {
+            app_state.sound_system.paused = !app_state.sound_system.paused;
+
+            if app_state.sound_system.paused {
+                for sound in &app_state.currently_playing {
+                    sound.sink.pause();
+                }
+            }
+            else {
+                for sound in &app_state.currently_playing {
+                    sound.sink.play();
+                }
+            }
+        }
     });
 
     egui::CentralPanel::default().show(ctx, |ui| {
