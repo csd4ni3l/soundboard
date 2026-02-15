@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs::File, io::BufReader, path::Path, time::Insta
 
 use serde::{Deserialize, Serialize};
 
-use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui};
+use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui::{self, Context}};
 
 use egui::ecolor::Color32;
 
@@ -29,6 +29,7 @@ struct PlayingSound {
     file_path: String,
     length: f32,
     sink: Sink,
+    to_remove: bool,
     #[cfg(target_os = "windows")]
     normal_sink: Sink,
 }
@@ -37,7 +38,6 @@ struct SoundSystem {
     #[cfg(target_os = "windows")]
     normal_output_stream: OutputStream,
     output_stream: OutputStream,
-    paused: bool,
 }
 
 #[derive(Resource)]
@@ -50,7 +50,8 @@ struct AppState {
     virt_outputs: Vec<(String, String)>,
     virt_output_index_switch: String,
     virt_output_index: String,
-    last_virt_output_update: Instant
+    last_virt_output_update: Instant,
+    current_view: String
 }
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
@@ -62,7 +63,6 @@ fn create_virtual_mic() -> SoundSystem {
         return SoundSystem {
             output_stream: virtual_mic,
             normal_output_stream: normal,
-            paused: false,
         };
     }
 
@@ -70,7 +70,6 @@ fn create_virtual_mic() -> SoundSystem {
     {
         return SoundSystem {
             output_stream: linux_lib::create_virtual_mic_linux(),
-            paused: false,
         };
     }
 
@@ -91,7 +90,6 @@ fn create_virtual_mic() -> SoundSystem {
                 .expect("Unable to open device")
                 .open_stream()
                 .expect("Failed to open stream"),
-            paused: false,
         }
     }
 }
@@ -143,6 +141,7 @@ fn main() {
             virt_outputs: Vec::new(),
             virt_output_index_switch: String::from("0"),
             virt_output_index: String::from("999"),
+            current_view: "main".to_string(),
             last_virt_output_update: Instant::now()
         })
         .add_systems(
@@ -254,6 +253,7 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
         file_path: file_path.clone(),
         length,
         sink,
+        to_remove: false,
         #[cfg(target_os = "windows")]
         normal_sink: {
             let file2 = File::open(&file_path).unwrap();
@@ -269,13 +269,7 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     app_state.currently_playing.push(playing_sound);
 }
 
-fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
-    let ctx = contexts.ctx_mut()?;
-
-    egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-        ui.heading("csd4ni3l Soundboard");
-    });
-
+fn main_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
     egui::SidePanel::right("tools").show(ctx, |ui| {
         ui.heading("Tools");
 
@@ -353,7 +347,7 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
             )
             .clicked()
         {
-            println!("Youtube downloader!");
+            app_state.current_view = "youtube_downloader".to_string();
         }
 
         if ui
@@ -366,51 +360,6 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
             app_state.currently_playing.clear();
             app_state.sound_system = reload_sound();
             println!("Sucessfully reloaded sound system!");
-        }
-    });
-
-    egui::TopBottomPanel::bottom("currently_playing").show(ctx, |ui| {
-        ui.vertical(|ui| {
-            for playing_sound in &app_state.currently_playing {
-                ui.label(format!(
-                    "{} - {:.2} / {:.2}",
-                    playing_sound.file_path,
-                    playing_sound.sink.get_pos().as_secs_f32(),
-                    playing_sound.length
-                ));
-            }
-        });
-        let available_width = ui.available_width();
-        let available_height = ui.available_height();
-
-        if ui
-            .add_sized(
-                [available_width, available_height / 15.0],
-                egui::Button::new("Stop all"),
-            )
-            .clicked()
-        {
-            app_state.currently_playing.clear();
-        }
-        if ui
-            .add_sized(
-                [available_width, available_height / 15.0],
-                egui::Button::new(if app_state.sound_system.paused {"Resume"} else {"Pause"}),
-            )
-            .clicked()
-        {
-            app_state.sound_system.paused = !app_state.sound_system.paused;
-
-            if app_state.sound_system.paused {
-                for sound in &app_state.currently_playing {
-                    sound.sink.pause();
-                }
-            }
-            else {
-                for sound in &app_state.currently_playing {
-                    sound.sink.play();
-                }
-            }
         }
     });
 
@@ -468,10 +417,90 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
             });
         }
     });
+}
 
-    app_state.currently_playing.retain(|playing_sound| {
-        playing_sound.sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) // 0.01 offset needed here because of floating point errors and so its not exact
+fn youtube_downloader_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.heading("Coming Soon!");
     });
+}
+
+fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
+    let ctx = contexts.ctx_mut()?;
+
+    egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+        ui.heading("csd4ni3l Soundboard");
+    });
+
+    egui::TopBottomPanel::bottom("currently_playing").show(ctx, |ui| {
+        ui.vertical(|ui| {
+            for playing_sound in &mut app_state.currently_playing {
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "{} - {:.2} / {:.2}",
+                        playing_sound.file_path,
+                        playing_sound.sink.get_pos().as_secs_f32(),
+                        playing_sound.length
+                    ));
+                    let available_width = ui.available_width();
+                    let available_height = ui.available_height();
+                    if ui
+                        .add_sized(
+                            [
+                                available_width / 2 as f32,
+                                available_height,
+                            ],
+                            egui::Button::new("Stop"),
+                        )
+                        .clicked()
+                    {
+                        playing_sound.to_remove = true;
+                    };
+                    if ui
+                        .add_sized(
+                            [
+                                available_width / 2 as f32,
+                                available_height,
+                            ],
+                            egui::Button::new(if playing_sound.sink.is_paused() {"Resume"} else {"Pause"}),
+                        )
+                        .clicked()
+                    {
+                        if playing_sound.sink.is_paused() {
+                            playing_sound.sink.play();
+                        }
+                        else {
+                            playing_sound.sink.pause();
+                        }
+                    };
+                });
+            }
+        });
+        
+        let available_width = ui.available_width();
+        let available_height = ui.available_height();
+
+        if ui
+            .add_sized(
+                [available_width, available_height / 15.0],
+                egui::Button::new("Stop all"),
+            )
+            .clicked()
+        {
+            app_state.currently_playing.clear();
+        }
+    });
+    
+    app_state.currently_playing.retain(|playing_sound| { // retains happen the next cycle, not in the current one because of borrowing and im lazy to fix
+        playing_sound.sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) && !playing_sound.to_remove  // 0.01 offset needed here because of floating point errors and so its not exact
+    });
+    
+    if app_state.current_view == "main".to_string() {
+        main_ui(ctx, app_state);
+    }
+    else if app_state.current_view == "youtube_downloader".to_string() {
+        youtube_downloader_ui(ctx, app_state);
+    }
 
     Ok(())
 }
