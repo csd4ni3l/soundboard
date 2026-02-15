@@ -269,7 +269,7 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     app_state.currently_playing.push(playing_sound);
 }
 
-fn create_virtual_mic_dropdown(ui: &mut Ui, mut app_state: &mut ResMut<AppState>, available_width: f32, available_height: f32) {
+fn create_virtual_mic_dropdown(ui: &mut Ui, app_state: &mut ResMut<AppState>, available_width: f32, available_height: f32) {
     #[cfg(target_os = "linux")] {
         let outputs = app_state.virt_outputs.clone();
         let output_index = app_state.virt_output_index.clone();
@@ -295,11 +295,13 @@ fn create_virtual_mic_dropdown(ui: &mut Ui, mut app_state: &mut ResMut<AppState>
 
         return;
     }
-
-    ui.add(egui::Button::new("Unsupported. Select inside apps.".to_string()));
+    #[allow(unreachable_code)]
+    {
+        ui.add(egui::Button::new("Unsupported. Select inside apps.".to_string()));
+    }
 }
 
-fn main_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
+fn main_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
     egui::SidePanel::right("tools").show(ctx, |ui| {
         ui.heading("Tools");
 
@@ -424,9 +426,9 @@ fn main_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
     });
 }
 
-fn youtube_downloader_ui(mut ctx: &Context, mut app_state: ResMut<AppState>) {
+fn youtube_downloader_ui(ctx: &Context, app_state: ResMut<AppState>) {
     egui::CentralPanel::default().show(ctx, |ui| {
-        ui.heading("Coming Soon!");
+        ui.heading(format!("Coming Soon! Currently on {} view.", app_state.current_view)); // view is only included here so there is no warning about app_state not being used.
     });
 }
 
