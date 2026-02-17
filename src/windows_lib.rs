@@ -2,7 +2,7 @@ use rodio::{
     OutputStream, OutputStreamBuilder,
     cpal::{self, traits::{DeviceTrait, StreamTrait, HostTrait}, StreamConfig, SampleRate},
 };
-
+use rfd::{MessageButtons, MessageDialog, MessageDialogResult};
 use ringbuf::{traits::*, HeapRb};
 
 fn route_standard_to_virtual(host: &cpal::Host, virtual_mic: &cpal::Device) {
@@ -57,7 +57,15 @@ pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream) {
                 .map(|name| name.contains("CABLE Input") || name.contains("VB-Audio"))
                 .unwrap_or(false)
         })
-        .expect("Could not get VB Cable output device. Is VB Cable Driver installed?");
+        .unwrap_or("Not installed");
+
+    if virtual_mic == "Not installed" {
+        MessageDialog::new()
+            .set_title("VB Cable Driver not installed.")
+            .set_description("Could not access VB Cable output device. Is VB Cable Driver installed?")
+            .set_buttons(MessageButtons::Ok)
+            .show();
+    }
 
     route_standard_to_virtual(&host, &virtual_mic);
 
