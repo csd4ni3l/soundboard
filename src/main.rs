@@ -1,12 +1,11 @@
 use bevy::{log::Level, prelude::*};
+use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui::{self, Context, TextBuffer, Ui, ecolor::Color32}};
 
-use std::{collections::HashMap, fs::File, io::BufReader, path::Path, time::Instant};
+use std::{collections::HashMap, fs::{File, create_dir, exists, rename}, io::{BufReader, Read, Seek}, path::Path, process::{Command, Stdio}, sync::{Arc, Mutex}, thread, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
-use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui::{self, Context, Ui}};
-
-use egui::ecolor::Color32;
+mod yt_dlp;
 
 #[cfg(target_os = "linux")]
 mod linux_lib;
@@ -18,6 +17,8 @@ use rodio::{
     Decoder, OutputStream, OutputStreamBuilder, Sink, Source,
     cpal::{self, traits::HostTrait},
 };
+
+use crate::yt_dlp::*;
 
 #[derive(Serialize, Deserialize)]
 struct JSONData {
@@ -40,6 +41,14 @@ struct SoundSystem {
     output_stream: OutputStream,
 }
 
+struct YoutubeDownloaderState {
+    current_url: String,
+    current_filename: String,
+    download_directory: String,
+    yt_dlp_running: bool,
+    yt_dlp_stdout_text: Arc<Mutex<String>>
+}
+
 #[derive(Resource)]
 struct AppState {
     loaded_files: HashMap<String, Vec<String>>,
@@ -51,7 +60,8 @@ struct AppState {
     virt_output_index_switch: String,
     virt_output_index: String,
     last_virt_output_update: Instant,
-    current_view: String
+    current_view: String,
+    youtube_downloader_state: YoutubeDownloaderState
 }
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
@@ -113,6 +123,13 @@ fn list_outputs() -> Vec<(String, String)> {
 }
 
 fn main() {
+    if !exists("bin").expect("Could not check existence of bin folder") {
+        let _ = create_dir("bin");
+    }
+
+    check_and_download_ffmpeg();
+    check_and_download_yt_dlp();
+
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
@@ -142,7 +159,14 @@ fn main() {
             virt_output_index_switch: String::from("0"),
             virt_output_index: String::from("999"),
             current_view: "main".to_string(),
-            last_virt_output_update: Instant::now()
+            last_virt_output_update: Instant::now(),
+            youtube_downloader_state: YoutubeDownloaderState { 
+                current_url: String::new(),
+                current_filename: String::new(),
+                download_directory: String::new(),
+                yt_dlp_running: false,
+                yt_dlp_stdout_text: Arc::new(Mutex::new(String::new()))
+            }
         })
         .add_systems(
             PreStartup,
@@ -237,14 +261,30 @@ fn update_ui_scale_factor_system(egui_context: Single<(&mut EguiContextSettings,
     egui_settings.scale_factor = 1.5 / camera.target_scaling_factor().unwrap_or(1.5);
 }
 
+fn get_duration<R>(decoder: &mut rodio::Decoder<R>) -> f32 // get_duration is needed cause some MP3 files dont provide duration metadata so we need to count
+where
+    R: Read + Seek,
+{
+    let mut total_samples: u32 = 0;
+
+    for _ in decoder.by_ref() {
+        total_samples += 1;
+    }
+
+    let sample_rate = decoder.sample_rate() as u32;
+    let channels = decoder.channels() as u32;
+
+    total_samples as f32 / (sample_rate * channels) as f32
+}
+
 fn play_sound(file_path: String, app_state: &mut AppState) {
     let file = File::open(&file_path).unwrap();
+    let mut src = Decoder::new(BufReader::new(file)).unwrap();
+    let length = get_duration(&mut src);
+    
+    // need to recreate since get_duration seeks to the end and nothing is left
+    let file = File::open(&file_path).unwrap();
     let src = Decoder::new(BufReader::new(file)).unwrap();
-    let length = src
-        .total_duration()
-        .expect("Could not get source duration")
-        .as_secs_f32();
-
     let sink = Sink::connect_new(&app_state.sound_system.output_stream.mixer());
     sink.append(src);
     sink.play();
@@ -426,9 +466,91 @@ fn main_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
     });
 }
 
-fn youtube_downloader_ui(ctx: &Context, app_state: ResMut<AppState>) {
+fn download_youtube_sound(app_state: &mut ResMut<AppState>) {
+    let filename = app_state.youtube_downloader_state.current_filename.clone();
+    let download_directory = app_state.youtube_downloader_state.download_directory.clone();
+    let current_url = app_state.youtube_downloader_state.current_url.clone();
+    let stdout_text = Arc::clone(&app_state.youtube_downloader_state.yt_dlp_stdout_text);
+
+    app_state.youtube_downloader_state.yt_dlp_running = true;
+
+    thread::spawn(move || {
+        let mut command = Command::new(get_yt_dlp_path())
+            .args(&["-x", "--audio-format", "mp3", "-o", "sound.mp3", current_url.as_str()]) 
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute process");
+
+        if let Some(mut stdout) = command.stdout.take() {
+            let mut buffer = String::new();
+            loop {
+                let mut chunk = vec![0u8; 1024];
+                match stdout.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Ok(text) = String::from_utf8(chunk[..n].to_vec()) {
+                            buffer.push_str(&text);
+                            if let Ok(mut locked) = stdout_text.lock() {
+                                *locked = buffer.clone();
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        let _ = command.wait();
+
+        let path = Path::new(&download_directory).join(filename);
+        let _ = rename("sound.mp3", path.to_string_lossy().as_str());
+    });
+}
+
+fn youtube_downloader_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
     egui::CentralPanel::default().show(ctx, |ui| {
-        ui.heading(format!("Coming Soon! Currently on {} view.", app_state.current_view)); // view is only included here so there is no warning about app_state not being used.
+        let available_width = ui.available_width();
+        let available_height = ui.available_height();
+        
+        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.heading("Directory");
+            egui::ComboBox::from_id_salt("Download Directory Selector")
+                .selected_text(app_state.youtube_downloader_state.download_directory.clone())
+                .width(available_width)
+                .height(available_height / 15.0)
+                .show_ui(ui, |ui| {
+                    for directory in &app_state.loaded_files.keys().cloned().collect::<Vec<_>>() {
+                        ui.selectable_value(
+                            &mut app_state.youtube_downloader_state.download_directory,
+                            directory.clone(),
+                            directory,
+                        );
+                    }
+                });
+
+            ui.heading("Filename");
+            ui.add_sized([available_width, available_height / 20.0], egui::TextEdit::singleline(&mut app_state.youtube_downloader_state.current_filename));
+
+            ui.heading("Youtube URL");
+            ui.add_sized([available_width, available_height / 20.0], egui::TextEdit::singleline(&mut app_state.youtube_downloader_state.current_url));
+        });
+        
+        if let Ok(text) = app_state.youtube_downloader_state.yt_dlp_stdout_text.lock() {
+            ui.colored_label(Color32::GREEN, text.clone());
+        };
+
+        if ui
+            .add_sized(
+                [
+                    available_width as f32,
+                    available_height / 15.0,
+                ],
+                egui::Button::new("Download Sound"),
+            )
+            .clicked()
+        {
+            download_youtube_sound(&mut app_state);
+        };
     });
 }
 
@@ -436,7 +558,27 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
     let ctx = contexts.ctx_mut()?;
 
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-        ui.heading("csd4ni3l Soundboard");
+        if app_state.current_view != "main" {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let available_width = ui.available_width();
+                let available_height = ui.available_height();
+
+                if ui
+                    .add_sized(
+                        [available_width / 25.0, available_height],
+                        egui::Button::new("<--"),
+                    )
+                    .clicked()
+                {
+                    app_state.current_view = "main".to_string();
+                }
+                
+                ui.heading("csd4ni3l Soundboard");
+            });
+        }
+        else {
+            ui.heading("csd4ni3l Soundboard");
+        }
     });
 
     egui::TopBottomPanel::bottom("currently_playing").show(ctx, |ui| {

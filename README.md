@@ -1,23 +1,18 @@
 # csd4ni3l Soundboard
 
-Soundboard made in Rust & Bevy. My first Rust project.
+Cross-platform soundboard made in Rust & Bevy. My first Rust project.
+You might ask, why? And my answer is why not? Also because i wanted to learn Rust and this was a good way.
 
-## Support & Requirements
+## Features & Requirements
 
-## Linux
-
-- Needs the `mold` linker and `clang` to compile fast
-- ALSA & PulseAudio/Pipewire-pulse is a requirement
-- Can use auto-selection of app to use the virtual mic in.
-- Auto-routes mic to virtual mic by default, so others can also hear you.
-
-## Windows
-
-- Needs the [VB-Cable driver](https://vb-audio.com/Cable/)
-- You need to still select the device inside the app you want to use it in.
-- They only hear the soundboard as of right now, not your actual mic.
-
-## MacOS & Other
-
-- Might work as a music player with the default output device.
-- Not supported and not planned.
+| Topic | Linux | Windows | MacOS & Other
+| -------- | ------- | ------- | ------- |
+| Requirements | ALSA & PulseAudio/Pipewire-pulse, optionally FFmpeg for youtube downloader | Needs the [VB-Cable driver](https://vb-audio.com/Cable), optionally FFmpeg for youtube downloader | Unknown (optionally FFmpeg for youtube downloader)|
+| Build Requirements | Rust, the `mold` linker and `clang` to compile fast | Rust, any C compiler | Unknown |
+| FFmpeg | Optionally for youtube downloader | Optional, Automatic install on Windows 11 (winget) | Optionally for youtube downloader |
+| Virtual Mic | Pulseaudio/Pipewire | VB-Cable | No |
+| App Selection | Yes | No | No |
+| Youtube Downloader support | Yes (ffmpeg required) | Yes (ffmpeg required) | Unknown (ffmpeg required) |
+| Can others hear you? | Yes | Experimental | Unknown |
+| Support | Best | Medium | None/Unknown |
+| Download | [Download for Linux](https://github.com/csd4ni3l/soundboard/releases/download/latest/soundboard) | [Download for Windows](https://github.com/csd4ni3l/soundboard/releases/download/latest/soundboard.exe) | Build it yourself. | 
