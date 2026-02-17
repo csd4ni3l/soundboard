@@ -59,8 +59,23 @@ pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream) {
                 .unwrap_or(false)
         });
 
-    if let Some(virtual_mic) = virtual_mic {
-        // nothing, let Some doesnt support !
+    if let Some(virtual_mic) = virtual_mic {        
+        route_standard_to_virtual(&host, &virtual_mic);
+
+        let normal_output = host
+            .default_output_device()
+            .expect("Could not get default output device");
+
+        return (
+            OutputStreamBuilder::from_device(normal_output)
+                .expect("Unable to open default audio device")
+                .open_stream()
+                .expect("Failed to open stream"),
+            OutputStreamBuilder::from_device(virtual_mic)
+                .expect("Unable to open default audio device")
+                .open_stream()
+                .expect("Failed to open stream"),
+        );
     }
     else {
         MessageDialog::new()
@@ -71,21 +86,4 @@ pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream) {
 
         std::process::exit(1);
     }
-
-    route_standard_to_virtual(&host, &virtual_mic);
-
-    let normal_output = host
-        .default_output_device()
-        .expect("Could not get default output device");
-
-    return (
-        OutputStreamBuilder::from_device(normal_output)
-            .expect("Unable to open default audio device")
-            .open_stream()
-            .expect("Failed to open stream"),
-        OutputStreamBuilder::from_device(virtual_mic)
-            .expect("Unable to open default audio device")
-            .open_stream()
-            .expect("Failed to open stream"),
-    );
 }
