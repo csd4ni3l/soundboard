@@ -56,10 +56,12 @@ pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream) {
                 .ok()
                 .map(|name| name.contains("CABLE Input") || name.contains("VB-Audio"))
                 .unwrap_or(false)
-        })
-        .unwrap_or("Not installed");
+        });
 
-    if virtual_mic == "Not installed" {
+    if let Some(virtual_mic) = virtual_mic {
+        // nothing, let Some doesnt support !
+    }
+    else {
         MessageDialog::new()
             .set_title("VB Cable Driver not installed.")
             .set_description("Could not access VB Cable output device. Is VB Cable Driver installed?")
