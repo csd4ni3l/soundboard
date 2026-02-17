@@ -4,6 +4,7 @@ use rodio::{
 };
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult};
 use ringbuf::{traits::*, HeapRb};
+use std::process;
 
 fn route_standard_to_virtual(host: &cpal::Host, virtual_mic: &cpal::Device) {
     let standard_mic = host.default_input_device().expect("Could not get default input device.");
@@ -67,6 +68,8 @@ pub fn create_virtual_mic_windows() -> (OutputStream, OutputStream) {
             .set_description("Could not access VB Cable output device. Is VB Cable Driver installed?")
             .set_buttons(MessageButtons::Ok)
             .show();
+
+        std::process::exit(1);
     }
 
     route_standard_to_virtual(&host, &virtual_mic);
