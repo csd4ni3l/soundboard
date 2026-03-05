@@ -105,7 +105,7 @@ pub fn list_outputs() -> Vec<(String, String)> {
 }
 
 pub fn move_output_to_sink(output_index: String, sink_index: String) {
-    let output = Command::new("pactl")
+    let _ = Command::new("pactl")
         .args(&["move-source-output", output_index.as_str(), sink_index.as_str()]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
         .output()
         .expect("Failed to execute process");

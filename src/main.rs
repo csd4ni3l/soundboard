@@ -574,7 +574,7 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
         }
     });
 
-    let window_height = ctx.screen_rect().height();
+    let window_height = ctx.content_rect().height();
 
     egui::TopBottomPanel::bottom("currently_playing")
         .exact_height(window_height * 0.1)

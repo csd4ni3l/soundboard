@@ -43,7 +43,7 @@ pub fn check_and_download_yt_dlp() {
 }
 
 pub fn check_ffmpeg() -> bool{
-    return std::process::Command::new("ffmpeg").spawn().is_ok();
+    return std::process::Command::new("ffmpeg").output().is_ok();
 }
 
 pub fn check_and_download_ffmpeg() {
