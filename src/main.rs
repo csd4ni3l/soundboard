@@ -57,8 +57,7 @@ struct AppState {
     currently_playing: Vec<PlayingSound>,
     sound_system: SoundSystem,
     virt_outputs: Vec<(String, String)>,
-    virt_output_index_switch: String,
-    virt_output_index: String,
+    is_virt_output_used: HashMap<String, bool>,
     last_virt_output_update: Instant,
     current_view: String,
     youtube_downloader_state: YoutubeDownloaderState
@@ -156,8 +155,7 @@ fn main() {
             currently_playing: Vec::new(),
             sound_system: create_virtual_mic(),
             virt_outputs: Vec::new(),
-            virt_output_index_switch: String::from("0"),
-            virt_output_index: String::from("999"),
+            is_virt_output_used: HashMap::new(),
             current_view: "main".to_string(),
             last_virt_output_update: Instant::now(),
             youtube_downloader_state: YoutubeDownloaderState { 
@@ -181,30 +179,29 @@ fn main() {
 }
 
 fn update(mut app_state: ResMut<AppState>) {
-    if app_state.last_virt_output_update.elapsed().as_secs_f32() >= 3.0 {
-        app_state.last_virt_output_update = Instant::now();
-        app_state.virt_outputs = list_outputs();    
-    }
+    #[cfg(target_os = "linux")] {
+        if app_state.last_virt_output_update.elapsed().as_secs_f32() >= 1.5 {
+            app_state.last_virt_output_update = Instant::now();
+            app_state.virt_outputs = list_outputs();
+            let is_virt_output_used = app_state.is_virt_output_used.clone();
 
-    if app_state.virt_outputs.is_empty() {
-        return;
-    }
+            for virt_output in &app_state.virt_outputs.clone() {
+                if !is_virt_output_used.contains_key(&virt_output.1) {
+                    app_state.is_virt_output_used.insert(virt_output.1.clone(), false);
+                }
 
-    if !(app_state.virt_output_index == "999".to_string()) {
-        app_state.virt_output_index_switch = app_state.virt_outputs[0].1.clone();
-    }
-
-    if app_state.virt_output_index != app_state.virt_output_index_switch {
-        app_state.virt_output_index = app_state.virt_output_index_switch.clone();
-        #[cfg(target_os = "linux")]
-        linux_lib::move_index_to_virtualmic(app_state.virt_output_index_switch.clone());
+                if app_state.is_virt_output_used[&virt_output.1] {
+                    linux_lib::move_output_to_sink(virt_output.1.clone(), linux_lib::get_soundboard_sink_index());
+                }
+                else {
+                    linux_lib::move_output_to_sink(virt_output.1.clone(), linux_lib::get_default_source());
+                }
+            }
+        }
     }
 }
 
 fn load_system(mut app_state: ResMut<AppState>) {   
-    if !app_state.virt_outputs.is_empty() {
-        app_state.virt_output_index_switch = app_state.virt_outputs[0].1.clone();
-    }
     load_data(&mut app_state);
 }
 
@@ -309,25 +306,22 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     app_state.currently_playing.push(playing_sound);
 }
 
-fn create_virtual_mic_dropdown(ui: &mut Ui, app_state: &mut ResMut<AppState>, available_width: f32, available_height: f32) {
+fn create_virtual_mic_ui(ui: &mut Ui, app_state: &mut ResMut<AppState>, available_width: f32, available_height: f32) {
     #[cfg(target_os = "linux")] {
-        let outputs = app_state.virt_outputs.clone();
-        let output_index = app_state.virt_output_index.clone();
-        let output_sink = linux_lib::get_sink_by_index("source-outputs", output_index);
-        if let Some(app_name) = output_sink["properties"]["application.name"].as_str() {
-            egui::ComboBox::from_id_salt("Virtual Mic Output")
-                .selected_text(app_name.to_string())
-                .width(available_width)
-                .height(available_height / 15.0)
-                .show_ui(ui, |ui| {
-                    for output in &outputs {
-                        ui.selectable_value(
-                            &mut app_state.virt_output_index_switch,
-                            output.1.clone(),
-                            output.0.clone(),
-                        );
-                    }
-                });
+        if app_state.is_virt_output_used.len() != 0 {
+            let outputs = app_state.virt_outputs.clone();
+            for output in &outputs {
+                let current_value = *app_state.is_virt_output_used.get(&output.1).unwrap_or(&false);
+                if ui
+                    .add_sized(
+                        [available_width, available_height / 30.0],
+                        egui::Button::new(format!("{} - {}", output.0.clone(), current_value)),
+                    )
+                    .clicked()
+                {
+                    *app_state.is_virt_output_used.entry(output.1.clone()).or_insert(false) = !current_value;
+                }
+            }
         }
         else {
             ui.add(egui::Button::new("No apps found to use.".to_string()));
@@ -350,7 +344,7 @@ fn main_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
         let available_width = ui.available_width();
         let available_height = ui.available_height();
         ui.label("Virtual Mic Output");
-        create_virtual_mic_dropdown(ui, &mut app_state, available_width, available_height);
+        create_virtual_mic_ui(ui, &mut app_state, available_width, available_height);
 
         if ui
             .add_sized(
@@ -361,7 +355,6 @@ fn main_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
         {
             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                 if let Some(path_str) = folder.to_str() {
-                    println!("Selected: {}", path_str);
                     app_state.json_data.tabs.push(path_str.to_string());
                     std::fs::write(
                         "data.json",
@@ -581,7 +574,11 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
         }
     });
 
-    egui::TopBottomPanel::bottom("currently_playing").show(ctx, |ui| {
+    let window_height = ctx.screen_rect().height();
+
+    egui::TopBottomPanel::bottom("currently_playing")
+        .exact_height(window_height * 0.1)
+        .show(ctx, |ui| {
         ui.vertical(|ui| {
             for playing_sound in &mut app_state.currently_playing {
                 ui.horizontal(|ui| {

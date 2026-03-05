@@ -5,7 +5,8 @@ use rodio::{
 use serde_json::Value;
 use std::process::Command;
 
-const APPS_TO_EXCLUDE: [&str; 1] = ["plasmashell"];
+const APPS_TO_EXCLUDE: [&str; 7] = ["plasmashell", "pavucontrol", "pipewire", "wireplumber", "kwin_wayland", "kwin_x11", "obs"];
+const NODE_NAMES_TO_EXCLUDE: [&str; 2] = ["VirtualMicSource", "SoundboardSink"];
 
 fn pactl_list(sink_type: &str) -> Value {
     let command_output = Command::new("pactl")
@@ -23,21 +24,35 @@ fn pactl_list(sink_type: &str) -> Value {
     }
 }
 
-pub fn get_sink_by_index(sink_type: &str, index: String) -> Value {
-    let sinks = pactl_list(sink_type);
+pub fn get_soundboard_sink_index() -> String {
+    let source_outputs = pactl_list("sinks");
+    source_outputs
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .find(|sink| sink["name"] == "SoundboardSink")
+        .and_then(|sink| {
+            Some(sink["index"].to_string())
+        })
+        .unwrap()
+}
 
-    for sink in sinks.as_array().unwrap_or(&vec![]) {
-        if sink["index"]
-            .as_u64()
-            .expect("sink index is not a number")
-            .to_string()
-            == index
-        {
-            return sink.clone();
-        }
-    }
+pub fn get_default_source() -> String {
+    let sources = pactl_list("sources");
+    
+    let command = Command::new("pactl")
+        .args(&["get-default-source"])
+        .output()
+        .unwrap();
 
-    return Value::Null {};
+    let default_source_name = String::from_utf8_lossy(&command.stdout).trim().to_string();
+
+    sources.as_array()
+    .unwrap()
+    .iter()
+    .find(|sink|{ sink["name"].as_str() == Some(&default_source_name) })
+    .and_then(|s|{ Some(s["index"].to_string()) })
+    .unwrap()
 }
 
 fn find_soundboard_sinks() -> Vec<Value> {
@@ -73,10 +88,11 @@ pub fn list_outputs() -> Vec<(String, String)> {
         .iter()
         .filter_map(|sink| {
             let app_name = sink["properties"]["application.name"].as_str()?;
+            let node_name = sink["properties"]["node.name"].as_str()?;
             let binary = sink["properties"]["application.process.binary"]
                 .as_str()
                 .unwrap_or("Unknown");
-            if APPS_TO_EXCLUDE.contains(&binary) {
+            if APPS_TO_EXCLUDE.contains(&binary) || NODE_NAMES_TO_EXCLUDE.contains(&node_name) {
                 return None;
             }
             let index = sink["index"]
@@ -88,9 +104,9 @@ pub fn list_outputs() -> Vec<(String, String)> {
         .collect();
 }
 
-pub fn move_index_to_virtualmic(index: String) {
-    Command::new("pactl")
-        .args(&["move-source-output", index.as_str(), "VirtualMicSource"]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
+pub fn move_output_to_sink(output_index: String, sink_index: String) {
+    let output = Command::new("pactl")
+        .args(&["move-source-output", output_index.as_str(), sink_index.as_str()]) // as_str is needed here as you cannot instantly dereference a growing String (Rust...)
         .output()
         .expect("Failed to execute process");
 }
