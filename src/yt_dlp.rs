@@ -1,4 +1,4 @@
-use std::{env::current_dir, fs::{File, exists}, io, process::Command};
+use std::{env::current_dir, fs::{File, exists}, io, os::unix::fs::PermissionsExt, process::Command};
 use reqwest;
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult};
 
@@ -40,6 +40,8 @@ pub fn check_and_download_yt_dlp() {
     let mut body = reqwest::blocking::get(url).expect("Could not download yt-dlp");
     let mut out = File::create(get_yt_dlp_path()).expect("failed to create file");
     io::copy(&mut body, &mut out).expect("failed to copy content");
+    out.set_permissions(PermissionsExt::from_mode(0o755));
+
 }
 
 pub fn check_ffmpeg() -> bool{
