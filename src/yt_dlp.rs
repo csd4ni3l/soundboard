@@ -1,6 +1,9 @@
-use std::{env::current_dir, fs::{File, exists}, io, os::unix::fs::PermissionsExt, process::Command};
+use std::{env::current_dir, fs::{File, exists}, io, process::Command};
 use reqwest;
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 pub fn get_yt_dlp_path() -> String {
     if cfg!(target_os = "windows"){
@@ -40,6 +43,8 @@ pub fn check_and_download_yt_dlp() {
     let mut body = reqwest::blocking::get(url).expect("Could not download yt-dlp");
     let mut out = File::create(get_yt_dlp_path()).expect("failed to create file");
     io::copy(&mut body, &mut out).expect("failed to copy content");
+
+    #[cfg(unix)]
     out.set_permissions(PermissionsExt::from_mode(0o755));
 
 }
