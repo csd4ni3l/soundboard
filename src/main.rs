@@ -1,7 +1,19 @@
 use bevy::{log::Level, prelude::*};
-use bevy_egui::{EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet, egui::{self, Context, TextBuffer, Ui, ecolor::Color32}};
+use bevy_egui::{
+    EguiContextSettings, EguiContexts, EguiPrimaryContextPass, EguiStartupSet,
+    egui::{self, Context, TextBuffer, Ui, ecolor::Color32},
+};
 
-use std::{collections::HashMap, fs::{File, create_dir, exists, rename}, io::{BufReader, Read, Seek}, path::Path, process::{Command, Stdio}, sync::{Arc, Mutex}, thread, time::Instant};
+use std::{
+    collections::HashMap,
+    fs::{File, create_dir, exists, rename},
+    io::{BufReader, Read, Seek},
+    path::Path,
+    process::{Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
+    time::Instant,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +58,7 @@ struct YoutubeDownloaderState {
     current_filename: String,
     download_directory: String,
     yt_dlp_running: bool,
-    yt_dlp_stdout_text: Arc<Mutex<String>>
+    yt_dlp_stdout_text: Arc<Mutex<String>>,
 }
 
 #[derive(Resource)]
@@ -60,7 +72,7 @@ struct AppState {
     is_virt_output_used: HashMap<String, bool>,
     last_virt_output_update: Instant,
     current_view: String,
-    youtube_downloader_state: YoutubeDownloaderState
+    youtube_downloader_state: YoutubeDownloaderState,
 }
 
 const ALLOWED_FILE_EXTENSIONS: [&str; 4] = ["mp3", "wav", "flac", "ogg"];
@@ -158,13 +170,13 @@ fn main() {
             is_virt_output_used: HashMap::new(),
             current_view: "main".to_string(),
             last_virt_output_update: Instant::now(),
-            youtube_downloader_state: YoutubeDownloaderState { 
+            youtube_downloader_state: YoutubeDownloaderState {
                 current_url: String::new(),
                 current_filename: String::new(),
                 download_directory: String::new(),
                 yt_dlp_running: false,
-                yt_dlp_stdout_text: Arc::new(Mutex::new(String::new()))
-            }
+                yt_dlp_stdout_text: Arc::new(Mutex::new(String::new())),
+            },
         })
         .add_systems(
             PreStartup,
@@ -179,7 +191,8 @@ fn main() {
 }
 
 fn update(mut app_state: ResMut<AppState>) {
-    #[cfg(target_os = "linux")] {
+    #[cfg(target_os = "linux")]
+    {
         if app_state.last_virt_output_update.elapsed().as_secs_f32() >= 1.5 {
             app_state.last_virt_output_update = Instant::now();
             app_state.virt_outputs = list_outputs();
@@ -187,21 +200,28 @@ fn update(mut app_state: ResMut<AppState>) {
 
             for virt_output in &app_state.virt_outputs.clone() {
                 if !is_virt_output_used.contains_key(&virt_output.1) {
-                    app_state.is_virt_output_used.insert(virt_output.1.clone(), false);
+                    app_state
+                        .is_virt_output_used
+                        .insert(virt_output.1.clone(), false);
                 }
 
                 if app_state.is_virt_output_used[&virt_output.1] {
-                    linux_lib::move_output_to_sink(virt_output.1.clone(), linux_lib::get_soundboard_sink_index());
-                }
-                else {
-                    linux_lib::move_output_to_sink(virt_output.1.clone(), linux_lib::get_default_source());
+                    linux_lib::move_output_to_sink(
+                        virt_output.1.clone(),
+                        linux_lib::get_soundboard_sink_index(),
+                    );
+                } else {
+                    linux_lib::move_output_to_sink(
+                        virt_output.1.clone(),
+                        linux_lib::get_default_source(),
+                    );
                 }
             }
         }
     }
 }
 
-fn load_system(mut app_state: ResMut<AppState>) {   
+fn load_system(mut app_state: ResMut<AppState>) {
     load_data(&mut app_state);
 }
 
@@ -258,7 +278,8 @@ fn update_ui_scale_factor_system(egui_context: Single<(&mut EguiContextSettings,
     egui_settings.scale_factor = 1.5 / camera.target_scaling_factor().unwrap_or(1.5);
 }
 
-fn get_duration<R>(decoder: &mut rodio::Decoder<R>) -> f32 // get_duration is needed cause some MP3 files dont provide duration metadata so we need to count
+fn get_duration<R>(decoder: &mut rodio::Decoder<R>) -> f32
+// get_duration is needed cause some MP3 files dont provide duration metadata so we need to count
 where
     R: Read + Seek,
 {
@@ -276,9 +297,15 @@ where
 
 fn play_sound(file_path: String, app_state: &mut AppState) {
     let file = File::open(&file_path).unwrap();
-    let mut src = Decoder::new(BufReader::new(file)).unwrap();
+    let decoded = Decoder::new(BufReader::new(file));
+    let mut src;
+    if decoded.is_ok() {
+        src = decoded.unwrap();
+    } else {
+        return;
+    }
     let length = get_duration(&mut src);
-    
+
     // need to recreate since get_duration seeks to the end and nothing is left
     let file = File::open(&file_path).unwrap();
     let src = Decoder::new(BufReader::new(file)).unwrap();
@@ -306,12 +333,21 @@ fn play_sound(file_path: String, app_state: &mut AppState) {
     app_state.currently_playing.push(playing_sound);
 }
 
-fn create_virtual_mic_ui(ui: &mut Ui, app_state: &mut ResMut<AppState>, available_width: f32, available_height: f32) {
-    #[cfg(target_os = "linux")] {
+fn create_virtual_mic_ui(
+    ui: &mut Ui,
+    app_state: &mut ResMut<AppState>,
+    available_width: f32,
+    available_height: f32,
+) {
+    #[cfg(target_os = "linux")]
+    {
         if app_state.is_virt_output_used.len() != 0 {
             let outputs = app_state.virt_outputs.clone();
             for output in &outputs {
-                let current_value = *app_state.is_virt_output_used.get(&output.1).unwrap_or(&false);
+                let current_value = *app_state
+                    .is_virt_output_used
+                    .get(&output.1)
+                    .unwrap_or(&false);
                 if ui
                     .add_sized(
                         [available_width, available_height / 30.0],
@@ -319,11 +355,13 @@ fn create_virtual_mic_ui(ui: &mut Ui, app_state: &mut ResMut<AppState>, availabl
                     )
                     .clicked()
                 {
-                    *app_state.is_virt_output_used.entry(output.1.clone()).or_insert(false) = !current_value;
+                    *app_state
+                        .is_virt_output_used
+                        .entry(output.1.clone())
+                        .or_insert(false) = !current_value;
                 }
             }
-        }
-        else {
+        } else {
             ui.add(egui::Button::new("No apps found to use.".to_string()));
         }
 
@@ -331,7 +369,9 @@ fn create_virtual_mic_ui(ui: &mut Ui, app_state: &mut ResMut<AppState>, availabl
     }
     #[allow(unreachable_code)]
     {
-        ui.add(egui::Button::new("Unsupported. Select inside apps.".to_string()));
+        ui.add(egui::Button::new(
+            "Unsupported. Select inside apps.".to_string(),
+        ));
     }
 }
 
@@ -461,42 +501,82 @@ fn main_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
 
 fn download_youtube_sound(app_state: &mut ResMut<AppState>) {
     let filename = app_state.youtube_downloader_state.current_filename.clone();
-    let download_directory = app_state.youtube_downloader_state.download_directory.clone();
+    let download_directory = app_state
+        .youtube_downloader_state
+        .download_directory
+        .clone();
     let current_url = app_state.youtube_downloader_state.current_url.clone();
     let stdout_text = Arc::clone(&app_state.youtube_downloader_state.yt_dlp_stdout_text);
 
     app_state.youtube_downloader_state.yt_dlp_running = true;
 
     thread::spawn(move || {
-        let mut command = Command::new(get_yt_dlp_path())
-            .args(&["-x", "--audio-format", "mp3", "-o", "sound.mp3", current_url.as_str()]) 
+        let mut child = Command::new(get_yt_dlp_path())
+            .args(&[
+                "-x",
+                "--audio-format",
+                "mp3",
+                "-o",
+                "sound.mp3",
+                current_url.as_str(),
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to execute process");
 
-        if let Some(mut stdout) = command.stdout.take() {
-            let mut buffer = String::new();
-            loop {
-                let mut chunk = vec![0u8; 1024];
-                match stdout.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if let Ok(text) = String::from_utf8(chunk[..n].to_vec()) {
-                            buffer.push_str(&text);
-                            if let Ok(mut locked) = stdout_text.lock() {
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let stdout_text_for_thread = stdout_text.clone();
+        let stdout_handle = thread::spawn(move || {
+            if let Some(mut stdout) = stdout {
+                let mut buf = [0u8; 4096];
+                let mut buffer = String::new();
+
+                loop {
+                    match stdout.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
+                            if let Ok(mut locked) = stdout_text_for_thread.lock() {
                                 *locked = buffer.clone();
                             }
                         }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
             }
-        }
-        let _ = command.wait();
+        });
+
+        let stderr_text_for_thread = stdout_text.clone();
+        let stderr_handle = thread::spawn(move || {
+            if let Some(mut stderr) = stderr {
+                let mut buf = [0u8; 4096];
+                let mut buffer = String::new();
+
+                loop {
+                    match stderr.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
+                            if let Ok(mut locked) = stderr_text_for_thread.lock() {
+                                *locked = buffer.clone();
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+
+        let _status = child.wait();
+
+        let _ = stdout_handle.join();
+        let _ = stderr_handle.join();
 
         let path = Path::new(&download_directory).join(filename);
-        let _ = rename("sound.mp3", path.to_string_lossy().as_str());
+        let _ = rename("sound.mp3", path.to_string_lossy().as_ref());
     });
 }
 
@@ -504,11 +584,16 @@ fn youtube_downloader_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
     egui::CentralPanel::default().show(ctx, |ui| {
         let available_width = ui.available_width();
         let available_height = ui.available_height();
-        
+
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
             ui.heading("Directory");
             egui::ComboBox::from_id_salt("Download Directory Selector")
-                .selected_text(app_state.youtube_downloader_state.download_directory.clone())
+                .selected_text(
+                    app_state
+                        .youtube_downloader_state
+                        .download_directory
+                        .clone(),
+                )
                 .width(available_width)
                 .height(available_height / 15.0)
                 .show_ui(ui, |ui| {
@@ -522,22 +607,27 @@ fn youtube_downloader_ui(ctx: &Context, mut app_state: ResMut<AppState>) {
                 });
 
             ui.heading("Filename");
-            ui.add_sized([available_width, available_height / 20.0], egui::TextEdit::singleline(&mut app_state.youtube_downloader_state.current_filename));
+            ui.add_sized(
+                [available_width, available_height / 20.0],
+                egui::TextEdit::singleline(
+                    &mut app_state.youtube_downloader_state.current_filename,
+                ),
+            );
 
             ui.heading("Youtube URL");
-            ui.add_sized([available_width, available_height / 20.0], egui::TextEdit::singleline(&mut app_state.youtube_downloader_state.current_url));
+            ui.add_sized(
+                [available_width, available_height / 20.0],
+                egui::TextEdit::singleline(&mut app_state.youtube_downloader_state.current_url),
+            );
         });
-        
+
         if let Ok(text) = app_state.youtube_downloader_state.yt_dlp_stdout_text.lock() {
             ui.colored_label(Color32::GREEN, text.clone());
         };
 
         if ui
             .add_sized(
-                [
-                    available_width as f32,
-                    available_height / 15.0,
-                ],
+                [available_width as f32, available_height / 15.0],
                 egui::Button::new("Download Sound"),
             )
             .clicked()
@@ -565,11 +655,10 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
                 {
                     app_state.current_view = "main".to_string();
                 }
-                
+
                 ui.heading("csd4ni3l Soundboard");
             });
-        }
-        else {
+        } else {
             ui.heading("csd4ni3l Soundboard");
         }
     });
@@ -579,72 +668,70 @@ fn draw(mut contexts: EguiContexts, mut app_state: ResMut<AppState>) -> Result {
     egui::TopBottomPanel::bottom("currently_playing")
         .exact_height(window_height * 0.1)
         .show(ctx, |ui| {
-        ui.vertical(|ui| {
-            for playing_sound in &mut app_state.currently_playing {
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "{} - {:.2} / {:.2}",
-                        playing_sound.file_path,
-                        playing_sound.sink.get_pos().as_secs_f32(),
-                        playing_sound.length
-                    ));
-                    let available_width = ui.available_width();
-                    let available_height = ui.available_height();
-                    if ui
-                        .add_sized(
-                            [
-                                available_width / 2 as f32,
-                                available_height,
-                            ],
-                            egui::Button::new("Stop"),
-                        )
-                        .clicked()
-                    {
-                        playing_sound.to_remove = true;
-                    };
-                    if ui
-                        .add_sized(
-                            [
-                                available_width / 2 as f32,
-                                available_height,
-                            ],
-                            egui::Button::new(if playing_sound.sink.is_paused() {"Resume"} else {"Pause"}),
-                        )
-                        .clicked()
-                    {
-                        if playing_sound.sink.is_paused() {
-                            playing_sound.sink.play();
-                        }
-                        else {
-                            playing_sound.sink.pause();
-                        }
-                    };
-                });
+            ui.vertical(|ui| {
+                for playing_sound in &mut app_state.currently_playing {
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} - {:.2} / {:.2}",
+                            playing_sound.file_path,
+                            playing_sound.sink.get_pos().as_secs_f32(),
+                            playing_sound.length
+                        ));
+                        let available_width = ui.available_width();
+                        let available_height = ui.available_height();
+                        if ui
+                            .add_sized(
+                                [available_width / 2 as f32, available_height],
+                                egui::Button::new("Stop"),
+                            )
+                            .clicked()
+                        {
+                            playing_sound.to_remove = true;
+                        };
+                        if ui
+                            .add_sized(
+                                [available_width / 2 as f32, available_height],
+                                egui::Button::new(if playing_sound.sink.is_paused() {
+                                    "Resume"
+                                } else {
+                                    "Pause"
+                                }),
+                            )
+                            .clicked()
+                        {
+                            if playing_sound.sink.is_paused() {
+                                playing_sound.sink.play();
+                            } else {
+                                playing_sound.sink.pause();
+                            }
+                        };
+                    });
+                }
+            });
+
+            let available_width = ui.available_width();
+            let available_height = ui.available_height();
+
+            if ui
+                .add_sized(
+                    [available_width, available_height / 15.0],
+                    egui::Button::new("Stop all"),
+                )
+                .clicked()
+            {
+                app_state.currently_playing.clear();
             }
         });
-        
-        let available_width = ui.available_width();
-        let available_height = ui.available_height();
 
-        if ui
-            .add_sized(
-                [available_width, available_height / 15.0],
-                egui::Button::new("Stop all"),
-            )
-            .clicked()
-        {
-            app_state.currently_playing.clear();
-        }
+    app_state.currently_playing.retain(|playing_sound| {
+        // retains happen the next cycle, not in the current one because of borrowing and im lazy to fix
+        playing_sound.sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01)
+            && !playing_sound.to_remove // 0.01 offset needed here because of floating point errors and so its not exact
     });
-    
-    app_state.currently_playing.retain(|playing_sound| { // retains happen the next cycle, not in the current one because of borrowing and im lazy to fix
-        playing_sound.sink.get_pos().as_secs_f32() <= (playing_sound.length - 0.01) && !playing_sound.to_remove  // 0.01 offset needed here because of floating point errors and so its not exact
-    });
-    
+
     if app_state.current_view == "main".to_string() {
         main_ui(ctx, app_state);
-    }
-    else if app_state.current_view == "youtube_downloader".to_string() {
+    } else if app_state.current_view == "youtube_downloader".to_string() {
         youtube_downloader_ui(ctx, app_state);
     }
 
