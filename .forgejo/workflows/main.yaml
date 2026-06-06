@@ -3,14 +3,14 @@ on: push
 jobs:
   build:
     name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            platform: linux
-          - os: windows-latest
-            platform: windows
+          - platform: linux
+            target: x86_64-unknown-linux-gnu
+          - platform: windows
+            target: x86_64-pc-windows-gnu
     steps:
       - name: Check-out repository
         uses: https://code.forgejo.org/actions/checkout@v4
@@ -21,9 +21,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install mold, clang, Wayland, ALSA and x11 headers and dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install mold, clang, Wayland, ALSA and x11 headers and dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential clang cmake pkg-config mold \
@@ -34,23 +33,28 @@ jobs:
             libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev \
             libasound2-dev libudev-dev
         shell: bash
+      - name: Install MinGW cross-compiler (Windows target)
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: sudo apt install -y gcc-mingw-w64-x86-64
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --verbose
+        run: cargo build --release --verbose --target ${{ matrix.target }}
       - name: Verify executable (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: test target/release/soundboard
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: test target/${{ matrix.target }}/release/soundboard
         shell: bash
       - name: Verify executable (Windows)
-        if: matrix.os == 'windows-latest'
-        run: Test-Path target\release\soundboard.exe
-        shell: pwsh
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: test target/${{ matrix.target }}/release/soundboard.exe
+        shell: bash
       - name: Upload build artifact
         uses: https://code.forgejo.org/actions/upload-artifact@v3
         with:
           name: ${{ matrix.platform }}
           path: |
-            target/release/soundboard
-            target/release/soundboard.exe
+            target/${{ matrix.target }}/release/soundboard
+            target/${{ matrix.target }}/release/soundboard.exe
   release:
     runs-on: ubuntu-latest
     needs: build
