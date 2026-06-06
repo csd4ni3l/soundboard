@@ -1,7 +1,5 @@
 name: Build and Release
-
 on: push
-
 jobs:
   build:
     name: Build on ${{ matrix.os }}
@@ -9,26 +7,23 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-latest
             platform: linux
           - os: windows-latest
             platform: windows
-
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
-
+        uses: https://code.forgejo.org/actions/checkout@v4
       - name: Cache
-        uses: actions/cache@v4
+        uses: https://code.forgejo.org/actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Install mold, clang, Wayland, ALSA and x11 headers and dependencies (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt install -y build-essential clang cmake pkg-config mold \
@@ -38,58 +33,42 @@ jobs:
             libxi-dev libxfixes-dev libxrender-dev \
             libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev \
             libasound2-dev libudev-dev
-
         shell: bash
-
       - name: Build
         run: cargo build --release --verbose
-
       - name: Verify executable (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu-latest'
         run: test target/release/soundboard
         shell: bash
-
       - name: Verify executable (Windows)
         if: matrix.os == 'windows-latest'
         run: Test-Path target\release\soundboard.exe
         shell: pwsh
-
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: https://code.forgejo.org/actions/upload-artifact@v3
         with:
           name: ${{ matrix.platform }}
           path: |
             target/release/soundboard
             target/release/soundboard.exe
-
   release:
     runs-on: ubuntu-latest
     needs: build
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: https://code.forgejo.org/actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Download All Build Artifacts
-        uses: actions/download-artifact@v4
+        uses: https://code.forgejo.org/actions/download-artifact@v3
         with:
           path: downloads
-
-      - name: Create release (if missing) and upload artifacts to tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="latest"
-          echo "Target release tag: $TAG"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; will upload assets with --clobber"
-          else
-            gh release create "$TAG" \
-              --title "$TAG" \
-              --notes "Automated build for $TAG"
-          fi
-          # Upload the executables directly (no zip files)
-          gh release upload "$TAG" downloads/linux/soundboard --clobber
-          gh release upload "$TAG" downloads/windows/soundboard.exe --clobber
+      - name: Create release and upload artifacts
+        uses: https://github.com/softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: latest
+          body: Automated build for latest
+          files: |
+            downloads/linux/soundboard
+            downloads/windows/soundboard.exe
