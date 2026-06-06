@@ -2,7 +2,7 @@ name: Build and Release
 on: push
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
+    name: Build on ${{ matrix.platform }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
