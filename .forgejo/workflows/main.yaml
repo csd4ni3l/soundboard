@@ -23,17 +23,15 @@ jobs:
             libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev \
             libxi-dev libxfixes-dev libxrender-dev \
             libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev \
-            libasound2-dev libudev-dev rustup
+            libasound2-dev libudev-dev
         shell: bash
       - name: Install Rust toolchain
         uses: https://github.com/dtolnay/rust-toolchain@nightly
         with:
-          targets: x86_64-unknown-none
+          targets: ${{ matrix.target }}
       - name: Install MinGW cross-compiler (Windows target)
         if: matrix.target == 'x86_64-pc-windows-gnu'
         run: sudo apt install -y gcc-mingw-w64-x86-64
-      - name: Add Rust target
-        run: rustup target add ${{ matrix.target }}
       - name: Build
         run: cargo build --release --verbose --target ${{ matrix.target }}
       - name: Verify executable (Linux)
