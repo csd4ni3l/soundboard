@@ -14,6 +14,10 @@ jobs:
     steps:
       - name: Check-out repository
         uses: https://code.forgejo.org/actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: https://github.com/dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.karch }}-unknown-none
       - name: Install mold, clang, Wayland, ALSA and x11 headers and dependencies
         run: |
           sudo apt update
