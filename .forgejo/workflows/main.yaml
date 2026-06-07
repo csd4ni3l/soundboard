@@ -66,6 +66,8 @@ jobs:
         with:
           tag_name: latest
           name: latest
+          prerelease: false
+          draft: false
           body: Automated build for latest
           files: |
             downloads/linux/soundboard
