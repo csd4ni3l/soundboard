@@ -16,3 +16,8 @@ You might ask, why? And my answer is why not? Also because i wanted to learn Rus
 | Can others hear you? | Yes | Experimental | Unknown |
 | Support | Best | Medium | None/Unknown |
 | Download | [Download for Linux](https://github.com/csd4ni3l/soundboard/releases/download/latest/soundboard) | [Download for Windows](https://github.com/csd4ni3l/soundboard/releases/download/latest/soundboard.exe) | Build it yourself. | 
+## Mirrors
+
+[![Forgejo](https://img.shields.io/badge/Forgejo-git.csd4ni3l.hu-1e90ff)](https://git.csd4ni3l.hu/csd4ni3l/soundboard)
+[![GitHub](https://img.shields.io/badge/GitHub-github.com-181717)](https://github.com/csd4ni3l/soundboard)
+[![Codeberg](https://img.shields.io/badge/Codeberg-codeberg.org-2185D0)](https://codeberg.org/csd4ni3l/soundboard)
